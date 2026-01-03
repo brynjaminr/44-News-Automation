@@ -1,0 +1,165 @@
+{
+  "description": "Deterministic genre to color mapping for 44 News Automation",
+  "background": "#f3feff",
+  "primaryText": "#003d96",
+  "genres": {
+    "Office Equipment & Technology": {
+      "color": "#2563eb",
+      "colorName": "Blue 600",
+      "textColor": "#ffffff"
+    },
+    "Food & Drink": {
+      "color": "#dc2626",
+      "colorName": "Red 600",
+      "textColor": "#ffffff"
+    },
+    "Telecommunications & Internet": {
+      "color": "#7c3aed",
+      "colorName": "Violet 600",
+      "textColor": "#ffffff"
+    },
+    "Healthcare": {
+      "color": "#059669",
+      "colorName": "Emerald 600",
+      "textColor": "#ffffff"
+    },
+    "Education": {
+      "color": "#0891b2",
+      "colorName": "Cyan 600",
+      "textColor": "#ffffff"
+    },
+    "Tobacco & E-cigarettes": {
+      "color": "#57534e",
+      "colorName": "Stone 600",
+      "textColor": "#ffffff"
+    },
+    "Charity & Nonprofit": {
+      "color": "#db2777",
+      "colorName": "Pink 600",
+      "textColor": "#ffffff"
+    },
+    "Fashion": {
+      "color": "#c026d3",
+      "colorName": "Fuchsia 600",
+      "textColor": "#ffffff"
+    },
+    "Retail": {
+      "color": "#ea580c",
+      "colorName": "Orange 600",
+      "textColor": "#ffffff"
+    },
+    "Professional & Business Services": {
+      "color": "#4f46e5",
+      "colorName": "Indigo 600",
+      "textColor": "#ffffff"
+    },
+    "Property & Construction": {
+      "color": "#ca8a04",
+      "colorName": "Yellow 600",
+      "textColor": "#ffffff"
+    },
+    "Agencies": {
+      "color": "#0d9488",
+      "colorName": "Teal 600",
+      "textColor": "#ffffff"
+    },
+    "Entertainment": {
+      "color": "#e11d48",
+      "colorName": "Rose 600",
+      "textColor": "#ffffff"
+    },
+    "Transportation & Logistics": {
+      "color": "#1d4ed8",
+      "colorName": "Blue 700",
+      "textColor": "#ffffff"
+    },
+    "Consumer Electronics": {
+      "color": "#6366f1",
+      "colorName": "Indigo 500",
+      "textColor": "#ffffff"
+    },
+    "Travel & Tourism": {
+      "color": "#0284c7",
+      "colorName": "Sky 600",
+      "textColor": "#ffffff"
+    },
+    "Financial": {
+      "color": "#15803d",
+      "colorName": "Green 700",
+      "textColor": "#ffffff"
+    },
+    "Utilities & Energy": {
+      "color": "#a16207",
+      "colorName": "Yellow 700",
+      "textColor": "#ffffff"
+    },
+    "Leisure & Hospitality": {
+      "color": "#be185d",
+      "colorName": "Pink 700",
+      "textColor": "#ffffff"
+    },
+    "Media & Publishing": {
+      "color": "#9333ea",
+      "colorName": "Purple 600",
+      "textColor": "#ffffff"
+    },
+    "Government & Public Sector": {
+      "color": "#1e40af",
+      "colorName": "Blue 800",
+      "textColor": "#ffffff"
+    },
+    "Cosmetics & Personal Care": {
+      "color": "#ec4899",
+      "colorName": "Pink 500",
+      "textColor": "#ffffff"
+    },
+    "Home & Garden": {
+      "color": "#65a30d",
+      "colorName": "Lime 600",
+      "textColor": "#ffffff"
+    },
+    "Automotive": {
+      "color": "#b91c1c",
+      "colorName": "Red 700",
+      "textColor": "#ffffff"
+    },
+    "Manufacturing & Industrial": {
+      "color": "#475569",
+      "colorName": "Slate 600",
+      "textColor": "#ffffff"
+    },
+    "Household Consumer Goods": {
+      "color": "#d97706",
+      "colorName": "Amber 600",
+      "textColor": "#ffffff"
+    }
+  },
+  "cssVariables": {
+    "office-equipment-technology": "#2563eb",
+    "food-drink": "#dc2626",
+    "telecommunications-internet": "#7c3aed",
+    "healthcare": "#059669",
+    "education": "#0891b2",
+    "tobacco-e-cigarettes": "#57534e",
+    "charity-nonprofit": "#db2777",
+    "fashion": "#c026d3",
+    "retail": "#ea580c",
+    "professional-business-services": "#4f46e5",
+    "property-construction": "#ca8a04",
+    "agencies": "#0d9488",
+    "entertainment": "#e11d48",
+    "transportation-logistics": "#1d4ed8",
+    "consumer-electronics": "#6366f1",
+    "travel-tourism": "#0284c7",
+    "financial": "#15803d",
+    "utilities-energy": "#a16207",
+    "leisure-hospitality": "#be185d",
+    "media-publishing": "#9333ea",
+    "government-public-sector": "#1e40af",
+    "cosmetics-personal-care": "#ec4899",
+    "home-garden": "#65a30d",
+    "automotive": "#b91c1c",
+    "manufacturing-industrial": "#475569",
+    "household-consumer-goods": "#d97706"
+  }
+}

@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>44 News Automation - Morning Brief</title>
+  <!--[if mso]>
+  <noscript>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+  </noscript>
+  <![endif]-->
+  <style type="text/css">
+    /* Reset styles */
+    body, table, td, p, a, li, blockquote {
+      -webkit-text-size-adjust: 100%;
+      -ms-text-size-adjust: 100%;
+    }
+    table, td {
+      mso-table-lspace: 0pt;
+      mso-table-rspace: 0pt;
+    }
+    img {
+      -ms-interpolation-mode: bicubic;
+      border: 0;
+      height: auto;
+      line-height: 100%;
+      outline: none;
+      text-decoration: none;
+    }
+
+    /* Base styles */
+    body {
+      margin: 0 !important;
+      padding: 0 !important;
+      background-color: #f3feff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.6;
+      color: #003d96;
+    }
+
+    .wrapper {
+      width: 100%;
+      table-layout: fixed;
+      background-color: #f3feff;
+      padding: 20px 0;
+    }
+
+    .main {
+      max-width: 680px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, #003d96 0%, #0056b3 100%);
+      padding: 30px 20px;
+      text-align: center;
+    }
+
+    .header h1 {
+      margin: 0 0 10px 0;
+      font-size: 28px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+
+    .header .date {
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    /* Content */
+    .content {
+      padding: 30px;
+    }
+
+    /* Top Signals */
+    .top-signals {
+      background: #f8fafc;
+      border-left: 4px solid #003d96;
+      padding: 20px;
+      margin-bottom: 30px;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .top-signals h2 {
+      margin: 0 0 15px 0;
+      font-size: 18px;
+      color: #003d96;
+      font-weight: 600;
+    }
+
+    .top-signals ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .top-signals li {
+      margin-bottom: 8px;
+      color: #334155;
+    }
+
+    .top-signals a {
+      color: #003d96;
+      text-decoration: none;
+    }
+
+    .top-signals a:hover {
+      text-decoration: underline;
+    }
+
+    /* Genre Sections */
+    .genre-section {
+      margin-bottom: 30px;
+    }
+
+    .genre-header {
+      color: #ffffff;
+      padding: 12px 20px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    /* Genre-specific colors */
+    .genre-office-equipment-technology { background-color: #2563eb; }
+    .genre-food-drink { background-color: #dc2626; }
+    .genre-telecommunications-internet { background-color: #7c3aed; }
+    .genre-healthcare { background-color: #059669; }
+    .genre-education { background-color: #0891b2; }
+    .genre-tobacco-e-cigarettes { background-color: #57534e; }
+    .genre-charity-nonprofit { background-color: #db2777; }
+    .genre-fashion { background-color: #c026d3; }
+    .genre-retail { background-color: #ea580c; }
+    .genre-professional-business-services { background-color: #4f46e5; }
+    .genre-property-construction { background-color: #ca8a04; }
+    .genre-agencies { background-color: #0d9488; }
+    .genre-entertainment { background-color: #e11d48; }
+    .genre-transportation-logistics { background-color: #1d4ed8; }
+    .genre-consumer-electronics { background-color: #6366f1; }
+    .genre-travel-tourism { background-color: #0284c7; }
+    .genre-financial { background-color: #15803d; }
+    .genre-utilities-energy { background-color: #a16207; }
+    .genre-leisure-hospitality { background-color: #be185d; }
+    .genre-media-publishing { background-color: #9333ea; }
+    .genre-government-public-sector { background-color: #1e40af; }
+    .genre-cosmetics-personal-care { background-color: #ec4899; }
+    .genre-home-garden { background-color: #65a30d; }
+    .genre-automotive { background-color: #b91c1c; }
+    .genre-manufacturing-industrial { background-color: #475569; }
+    .genre-household-consumer-goods { background-color: #d97706; }
+
+    /* Story Cards */
+    .story-card {
+      background: #f8fafc;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 15px;
+      border-left: 4px solid #e2e8f0;
+    }
+
+    .story-card h3 {
+      margin: 0 0 10px 0;
+      font-size: 17px;
+      line-height: 1.4;
+    }
+
+    .story-card h3 a {
+      color: #003d96;
+      text-decoration: none;
+    }
+
+    .story-card h3 a:hover {
+      text-decoration: underline;
+    }
+
+    .story-card .source {
+      font-size: 12px;
+      color: #64748b;
+      margin-bottom: 10px;
+    }
+
+    .story-card .summary {
+      font-size: 14px;
+      color: #334155;
+      margin-bottom: 12px;
+      line-height: 1.6;
+    }
+
+    .story-card .why-matters {
+      font-size: 13px;
+      color: #475569;
+      background: #e0f2fe;
+      padding: 12px;
+      border-radius: 6px;
+      border-left: 3px solid #0284c7;
+      line-height: 1.5;
+    }
+
+    .story-card .why-matters strong {
+      color: #0369a1;
+    }
+
+    /* No News */
+    .no-news {
+      text-align: center;
+      padding: 40px 20px;
+      color: #64748b;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 20px;
+      color: #64748b;
+      font-size: 12px;
+      background: #f8fafc;
+    }
+
+    .footer p {
+      margin: 5px 0;
+    }
+
+    /* Mobile Responsive */
+    @media screen and (max-width: 600px) {
+      .wrapper {
+        padding: 10px !important;
+      }
+
+      .main {
+        border-radius: 8px !important;
+      }
+
+      .header {
+        padding: 20px 15px !important;
+      }
+
+      .header h1 {
+        font-size: 22px !important;
+      }
+
+      .header .date {
+        font-size: 14px !important;
+      }
+
+      .content {
+        padding: 20px 15px !important;
+      }
+
+      .top-signals {
+        padding: 15px !important;
+      }
+
+      .story-card {
+        padding: 15px !important;
+      }
+
+      .story-card h3 {
+        font-size: 15px !important;
+      }
+
+      .story-card .summary {
+        font-size: 13px !important;
+      }
+
+      .story-card .why-matters {
+        font-size: 12px !important;
+        padding: 10px !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <table class="main" role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="max-width: 680px; margin: 0 auto;">
+      <!-- Header -->
+      <tr>
+        <td class="header">
+          <h1>44 News Automation</h1>
+          <div class="date">Morning Brief — {{DATE}}</div>
+        </td>
+      </tr>
+
+      <!-- Content -->
+      <tr>
+        <td class="content">
+
+          <!-- Top Signals Section -->
+          {{#if HAS_STORIES}}
+          <div class="top-signals">
+            <h2>Top Signals</h2>
+            <ul>
+              {{#each TOP_SIGNALS}}
+              <li><a href="{{canonical_url}}">{{polished_title}}</a></li>
+              {{/each}}
+            </ul>
+          </div>
+          {{/if}}
+
+          <!-- Genre Sections -->
+          {{#each GENRES}}
+          <div class="genre-section">
+            <div class="genre-header" style="background-color: {{color}};">{{name}}</div>
+
+            {{#each stories}}
+            <div class="story-card">
+              <h3><a href="{{canonical_url}}">{{polished_title}}</a></h3>
+              <div class="source">{{source_name}}</div>
+              <div class="summary">{{summary}}</div>
+              <div class="why-matters">
+                <strong>Why this matters:</strong> {{why_matters}}
+              </div>
+            </div>
+            {{/each}}
+          </div>
+          {{/each}}
+
+          <!-- No News Message (if applicable) -->
+          {{#unless HAS_STORIES}}
+          <div class="no-news">
+            <p>{{NO_NEWS_MESSAGE}}</p>
+          </div>
+          {{/unless}}
+
+        </td>
+      </tr>
+
+      <!-- Footer -->
+      <tr>
+        <td class="footer">
+          <p>Automated by 44 News Automation</p>
+          <p>This email was generated automatically. Please do not reply.</p>
+        </td>
+      </tr>
+    </table>
+  </div>
+</body>
+</html>
+
+<!--
+TEMPLATE VARIABLES:
+==================
+{{DATE}} - Formatted date string (e.g., "Friday, 3 January 2026")
+{{HAS_STORIES}} - Boolean, true if there are stories
+{{TOP_SIGNALS}} - Array of top 5 stories
+{{GENRES}} - Array of genre objects:
+  - name: Genre name
+  - color: Hex color for header
+  - stories: Array of story objects
+{{NO_NEWS_MESSAGE}} - One of 7 rotating messages for no-news days
+
+STORY OBJECT:
+=============
+- canonical_url: Full URL to article
+- polished_title: LLM-polished title
+- source_name: Publisher name
+- summary: 3-6 sentence summary
+- why_matters: Max 3 sentences, agency-focused
+
+GENRE COLORS (for inline styles):
+=================================
+Office Equipment & Technology: #2563eb
+Food & Drink: #dc2626
+Telecommunications & Internet: #7c3aed
+Healthcare: #059669
+Education: #0891b2
+Tobacco & E-cigarettes: #57534e
+Charity & Nonprofit: #db2777
+Fashion: #c026d3
+Retail: #ea580c
+Professional & Business Services: #4f46e5
+Property & Construction: #ca8a04
+Agencies: #0d9488
+Entertainment: #e11d48
+Transportation & Logistics: #1d4ed8
+Consumer Electronics: #6366f1
+Travel & Tourism: #0284c7
+Financial: #15803d
+Utilities & Energy: #a16207
+Leisure & Hospitality: #be185d
+Media & Publishing: #9333ea
+Government & Public Sector: #1e40af
+Cosmetics & Personal Care: #ec4899
+Home & Garden: #65a30d
+Automotive: #b91c1c
+Manufacturing & Industrial: #475569
+Household Consumer Goods: #d97706
+
+NO-NEWS VARIANTS (rotate by day of year % 7):
+=============================================
+1. "Today's scan found no stories meeting our quality criteria within the 24-hour window. We'll be back tomorrow with fresh insights."
+2. "Our filters didn't surface any qualifying stories today. Sometimes quiet news days happen—we'll return tomorrow with the latest."
+3. "No stories passed our quality threshold today. Rest assured, we're monitoring continuously and will deliver tomorrow's brief as usual."
+4. "Today's news cycle didn't yield stories meeting our standards. We maintain strict criteria to ensure you only receive relevant, high-quality content."
+5. "A rare quiet day in our monitored sources. Our automated checks continue around the clock—expect your next brief tomorrow at 07:00."
+6. "No qualifying content today. Our multi-tier validation ensures quality over quantity. Tomorrow's brief will arrive on schedule."
+7. "Today's sources didn't produce content meeting our publication criteria. Quality assurance remains our priority—see you tomorrow."
+-->

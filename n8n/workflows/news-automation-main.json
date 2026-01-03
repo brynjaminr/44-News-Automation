@@ -1,0 +1,636 @@
+{
+  "name": "44 News Automation - Daily Run",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 07:00 UK",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "notes": "Triggers daily at 07:00 Europe/London"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM clients WHERE is_active = true",
+        "options": {}
+      },
+      "id": "get-active-clients",
+      "name": "Get Active Clients",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [220, 0],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "loop-clients",
+      "name": "Loop Over Clients",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO runs (client_id, run_date, status, started_at) VALUES ('{{ $json.id }}', CURRENT_DATE, 'running', NOW()) ON CONFLICT (client_id, run_date, run_number) DO UPDATE SET status = 'running', started_at = NOW() RETURNING *",
+        "options": {}
+      },
+      "id": "create-run",
+      "name": "Create Run Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [660, 0],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Loop Over Clients').item.json.sheet_id }}"
+        },
+        "range": "A:B",
+        "options": {
+          "headerRow": 1
+        }
+      },
+      "id": "read-google-sheet",
+      "name": "Read URLs from Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [880, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-cred",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Genre validation\nconst validGenres = [\n  'Office Equipment & Technology',\n  'Food & Drink',\n  'Telecommunications & Internet',\n  'Healthcare',\n  'Education',\n  'Tobacco & E-cigarettes',\n  'Charity & Nonprofit',\n  'Fashion',\n  'Retail',\n  'Professional & Business Services',\n  'Property & Construction',\n  'Agencies',\n  'Entertainment',\n  'Transportation & Logistics',\n  'Consumer Electronics',\n  'Travel & Tourism',\n  'Financial',\n  'Utilities & Energy',\n  'Leisure & Hospitality',\n  'Media & Publishing',\n  'Government & Public Sector',\n  'Cosmetics & Personal Care',\n  'Home & Garden',\n  'Automotive',\n  'Manufacturing & Industrial',\n  'Household Consumer Goods'\n];\n\nconst results = [];\nconst errors = [];\n\nfor (const item of $input.all()) {\n  const url = item.json.URL?.trim();\n  const genre = item.json.Genre?.trim();\n  \n  if (!url) {\n    errors.push({ url: 'empty', genre, reason: 'Missing URL' });\n    continue;\n  }\n  \n  if (!genre) {\n    errors.push({ url, genre: 'empty', reason: 'Missing genre' });\n    continue;\n  }\n  \n  if (!validGenres.includes(genre)) {\n    errors.push({ url, genre, reason: `Invalid genre: ${genre}` });\n    continue;\n  }\n  \n  // Valid row\n  results.push({\n    json: {\n      url,\n      genre,\n      client_id: $('Loop Over Clients').item.json.id,\n      run_id: $('Create Run Record').first().json.id\n    }\n  });\n}\n\n// Store errors for later logging\n$workflow.setStaticData('validation_errors', errors);\n\nreturn results.slice(0, 200); // Max 200 URLs per run"
+      },
+      "id": "validate-inputs",
+      "name": "Validate Genres",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {
+          "reset": false
+        }
+      },
+      "id": "batch-urls",
+      "name": "Batch URLs (5)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 5
+            }
+          }
+        }
+      },
+      "id": "fetch-article",
+      "name": "Fetch Article",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 0],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const cheerio = require('cheerio');\n\nconst item = $input.first();\nconst html = item.json.data;\nconst originalUrl = item.json.url;\nconst genre = item.json.genre;\nconst clientId = item.json.client_id;\nconst runId = item.json.run_id;\n\nif (!html || typeof html !== 'string') {\n  return [{\n    json: {\n      error: true,\n      reason: 'Empty or invalid response',\n      url: originalUrl,\n      genre,\n      client_id: clientId,\n      run_id: runId\n    }\n  }];\n}\n\nconst $ = cheerio.load(html);\n\n// Extract canonical URL\nlet canonicalUrl = $('link[rel=\"canonical\"]').attr('href') ||\n                   $('meta[property=\"og:url\"]').attr('content') ||\n                   originalUrl;\n\n// Normalize canonical URL\nif (canonicalUrl && !canonicalUrl.startsWith('http')) {\n  try {\n    const base = new URL(originalUrl);\n    canonicalUrl = new URL(canonicalUrl, base.origin).href;\n  } catch (e) {\n    canonicalUrl = originalUrl;\n  }\n}\n\n// Extract publisher/source name\nconst sourceName = $('meta[property=\"og:site_name\"]').attr('content') ||\n                   $('meta[name=\"application-name\"]').attr('content') ||\n                   new URL(canonicalUrl).hostname.replace('www.', '');\n\n// Extract title\nconst title = $('meta[property=\"og:title\"]').attr('content') ||\n              $('meta[name=\"title\"]').attr('content') ||\n              $('title').text().trim() ||\n              $('h1').first().text().trim();\n\n// ============================================\n// PUBLISH DATE EXTRACTION (Tiered Approach)\n// ============================================\nlet publishDate = null;\nlet publishDateSource = null;\nlet confidence = 0;\n\n// Tier 1: JSON-LD structured data\nconst jsonLdScripts = $('script[type=\"application/ld+json\"]');\njsonLdScripts.each((i, el) => {\n  if (publishDate) return;\n  try {\n    const data = JSON.parse($(el).html());\n    const items = Array.isArray(data) ? data : [data];\n    for (const item of items) {\n      if (item['@type'] === 'NewsArticle' || item['@type'] === 'Article') {\n        if (item.datePublished) {\n          publishDate = item.datePublished;\n          publishDateSource = 'jsonld';\n          confidence = 0.95;\n          break;\n        }\n        if (item.dateModified) {\n          publishDate = item.dateModified;\n          publishDateSource = 'jsonld_modified';\n          confidence = 0.85;\n          break;\n        }\n      }\n    }\n  } catch (e) {}\n});\n\n// Tier 2: OpenGraph / meta tags\nif (!publishDate) {\n  const ogDate = $('meta[property=\"article:published_time\"]').attr('content');\n  if (ogDate) {\n    publishDate = ogDate;\n    publishDateSource = 'opengraph';\n    confidence = 0.90;\n  }\n}\n\nif (!publishDate) {\n  const pubDate = $('meta[name=\"pubdate\"]').attr('content') ||\n                  $('meta[name=\"date\"]').attr('content') ||\n                  $('meta[name=\"DC.date\"]').attr('content') ||\n                  $('meta[name=\"DC.date.issued\"]').attr('content') ||\n                  $('meta[itemprop=\"datePublished\"]').attr('content');\n  if (pubDate) {\n    publishDate = pubDate;\n    publishDateSource = 'meta';\n    confidence = 0.80;\n  }\n}\n\n// Tier 3: <time> elements\nif (!publishDate) {\n  const timeEl = $('time[datetime]').first();\n  if (timeEl.length) {\n    publishDate = timeEl.attr('datetime');\n    publishDateSource = 'time_element';\n    confidence = 0.70;\n  }\n}\n\n// Tier 4: URL date patterns (last resort)\nif (!publishDate) {\n  const urlDateMatch = canonicalUrl.match(/\\/(20[0-9]{2})\\/(0[1-9]|1[0-2])\\/(0[1-9]|[12][0-9]|3[01])/);\n  if (urlDateMatch) {\n    publishDate = `${urlDateMatch[1]}-${urlDateMatch[2]}-${urlDateMatch[3]}`;\n    publishDateSource = 'url_pattern';\n    confidence = 0.50;\n  }\n}\n\n// ============================================\n// CONTENT EXTRACTION (Readability-like)\n// ============================================\n\n// Remove unwanted elements\n$('script, style, nav, header, footer, aside, .ad, .advertisement, .social-share, .related-articles, .comments').remove();\n\n// Try to find main content\nlet articleBody = '';\nconst contentSelectors = [\n  'article',\n  '[itemprop=\"articleBody\"]',\n  '.article-body',\n  '.article-content',\n  '.post-content',\n  '.entry-content',\n  '.story-body',\n  'main',\n  '.content'\n];\n\nfor (const selector of contentSelectors) {\n  const content = $(selector).first();\n  if (content.length && content.text().trim().length > 200) {\n    articleBody = content.text().trim();\n    break;\n  }\n}\n\n// Fallback to paragraphs if no article container found\nif (!articleBody || articleBody.length < 200) {\n  const paragraphs = [];\n  $('p').each((i, el) => {\n    const text = $(el).text().trim();\n    if (text.length > 50) {\n      paragraphs.push(text);\n    }\n  });\n  articleBody = paragraphs.join('\\n\\n');\n}\n\n// Check for paywall indicators\nconst paywallIndicators = [\n  '.paywall',\n  '.subscription-required',\n  '[data-paywall]',\n  '.premium-content',\n  '.subscriber-only'\n];\n\nlet isPaywalled = false;\nfor (const selector of paywallIndicators) {\n  if ($(selector).length > 0) {\n    isPaywalled = true;\n    break;\n  }\n}\n\n// Also check if content is too short (likely blocked)\nif (articleBody.length < 300) {\n  isPaywalled = true;\n}\n\n// Generate dedupe key (SHA256 of canonical URL)\nconst crypto = require('crypto');\nconst dedupeKey = crypto.createHash('sha256').update(canonicalUrl).digest('hex').substring(0, 64);\n\n// Normalize title for similarity comparison\nconst titleNormalized = title ? title.toLowerCase().replace(/[^a-z0-9\\s]/g, '').trim() : '';\n\n// Content fingerprint (simple hash of first 1000 chars)\nconst contentFingerprint = crypto.createHash('sha256').update(articleBody.substring(0, 1000)).digest('hex').substring(0, 64);\n\nreturn [{\n  json: {\n    url: originalUrl,\n    canonical_url: canonicalUrl,\n    genre,\n    client_id: clientId,\n    run_id: runId,\n    source_name: sourceName,\n    original_title: title,\n    article_body: articleBody,\n    publish_date: publishDate,\n    publish_date_source: publishDateSource,\n    publish_date_confidence: confidence,\n    is_paywalled: isPaywalled,\n    dedupe_key: dedupeKey,\n    title_normalized: titleNormalized,\n    content_fingerprint: contentFingerprint,\n    word_count: articleBody.split(/\\s+/).length\n  }\n}];"
+      },
+      "id": "extract-content",
+      "name": "Extract Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate publish date is within 24h window (07:00 to 07:00 UK)\nconst item = $input.first().json;\n\n// Check if already errored or paywalled\nif (item.error || item.is_paywalled) {\n  return [{\n    json: {\n      ...item,\n      skip: true,\n      skip_reason: item.error ? item.reason : 'Paywalled or blocked content'\n    }\n  }];\n}\n\n// Must have publish date\nif (!item.publish_date) {\n  return [{\n    json: {\n      ...item,\n      skip: true,\n      skip_reason: 'Could not determine publish date'\n    }\n  }];\n}\n\n// Parse publish date\nlet pubDate;\ntry {\n  pubDate = new Date(item.publish_date);\n  if (isNaN(pubDate.getTime())) {\n    throw new Error('Invalid date');\n  }\n} catch (e) {\n  return [{\n    json: {\n      ...item,\n      skip: true,\n      skip_reason: `Invalid publish date format: ${item.publish_date}`\n    }\n  }];\n}\n\n// Calculate 24h window (07:00 yesterday UK to 07:00 today UK)\nconst now = new Date();\n\n// Get current time in UK\nconst ukFormatter = new Intl.DateTimeFormat('en-GB', {\n  timeZone: 'Europe/London',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n  hour: '2-digit',\n  minute: '2-digit'\n});\n\n// Create window boundaries\n// Window end: 07:00 today UK\nconst todayUK = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/London' }));\ntodayUK.setHours(7, 0, 0, 0);\n\n// If we're before 07:00 UK, the window end is yesterday at 07:00\nconst currentHourUK = new Date().toLocaleString('en-US', { timeZone: 'Europe/London', hour: 'numeric', hour12: false });\nlet windowEnd = todayUK;\nif (parseInt(currentHourUK) < 7) {\n  // Before 7am, so window ended yesterday at 7am\n  windowEnd = new Date(todayUK);\n  windowEnd.setDate(windowEnd.getDate() - 1);\n}\n\n// Window start: 24 hours before window end\nconst windowStart = new Date(windowEnd);\nwindowStart.setDate(windowStart.getDate() - 1);\n\n// Convert publish date to UTC for comparison\nconst pubDateUTC = pubDate.getTime();\nconst windowStartUTC = windowStart.getTime();\nconst windowEndUTC = windowEnd.getTime();\n\n// Check if in window\nif (pubDateUTC < windowStartUTC || pubDateUTC > windowEndUTC) {\n  return [{\n    json: {\n      ...item,\n      skip: true,\n      skip_reason: `Publish date ${item.publish_date} outside 24h window (${windowStart.toISOString()} to ${windowEnd.toISOString()})`\n    }\n  }];\n}\n\n// Valid - pass through with parsed date\nreturn [{\n  json: {\n    ...item,\n    published_at: pubDate.toISOString(),\n    skip: false\n  }\n}];"
+      },
+      "id": "validate-publish-date",
+      "name": "Validate Publish Date",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "skip-check",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-skipped",
+      "name": "Filter Skipped",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2200, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO errors (client_id, run_id, url, genre, stage, error_type, error_message) VALUES ('{{ $json.client_id }}', '{{ $json.run_id }}', '{{ $json.url }}', '{{ $json.genre }}', 'validation', 'skipped', '{{ $json.skip_reason }}')",
+        "options": {}
+      },
+      "id": "log-skipped",
+      "name": "Log Skipped",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2420, 200],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deduplication check\nconst items = $input.all();\nconst seen = new Map();\nconst results = [];\nconst duplicates = [];\n\n// Sort by confidence (prefer higher confidence publish dates)\nitems.sort((a, b) => (b.json.publish_date_confidence || 0) - (a.json.publish_date_confidence || 0));\n\nfor (const item of items) {\n  const key = item.json.dedupe_key;\n  const titleNorm = item.json.title_normalized;\n  \n  // Check exact URL match\n  if (seen.has(key)) {\n    duplicates.push({\n      ...item.json,\n      duplicate_of: seen.get(key),\n      duplicate_type: 'url'\n    });\n    continue;\n  }\n  \n  // Check title similarity (simple approach - exact normalized match)\n  let isDuplicate = false;\n  for (const [existingKey, existing] of seen.entries()) {\n    if (existing.title_normalized === titleNorm && titleNorm.length > 20) {\n      duplicates.push({\n        ...item.json,\n        duplicate_of: existingKey,\n        duplicate_type: 'title'\n      });\n      isDuplicate = true;\n      break;\n    }\n    // Check content fingerprint\n    if (existing.content_fingerprint === item.json.content_fingerprint) {\n      duplicates.push({\n        ...item.json,\n        duplicate_of: existingKey,\n        duplicate_type: 'content'\n      });\n      isDuplicate = true;\n      break;\n    }\n  }\n  \n  if (!isDuplicate) {\n    seen.set(key, item.json);\n    results.push(item);\n  }\n}\n\n// Store duplicates for logging\n$workflow.setStaticData('duplicates', duplicates);\n\nreturn results;"
+      },
+      "id": "deduplicate",
+      "name": "Deduplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2420, 0]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a professional news editor for a marketing agency newsletter called '44 News Automation'. Your task is to:\n\n1. Polish the article title - keep it faithful and factual, no sensationalism\n2. Write a summary (3-6 sentences max) - factual, professional, concise\n3. Write 'Why this matters' (max 3 sentences) - formal, agency-focused, include 1 practical implication for marketing agencies, never invent facts\n4. Score agency relevance (1-5) based on practical marketing implications\n\nRules:\n- Never add facts not in the article\n- If uncertain, briefly signal uncertainty\n- Keep language concise and professional\n- Tone should read like a professional agency newsletter\n\nRespond in JSON format:\n{\n  \"polished_title\": \"...\",\n  \"summary\": \"...\",\n  \"why_matters\": \"...\",\n  \"agency_relevance_score\": 1-5\n}"
+            },
+            {
+              "role": "user",
+              "content": "Genre: {{ $json.genre }}\n\nOriginal Title: {{ $json.original_title }}\n\nSource: {{ $json.source_name }}\n\nArticle Content:\n{{ $json.article_body.substring(0, 4000) }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "responseFormat": "json_object"
+        }
+      },
+      "id": "llm-process",
+      "name": "LLM Process",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.7,
+      "position": [2640, 0],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-cred",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse LLM response and merge with original data\nconst item = $input.first();\nconst original = item.json;\n\nlet llmData;\ntry {\n  llmData = JSON.parse(original.message?.content || original.text || '{}');\n} catch (e) {\n  // If LLM response parsing fails, use fallbacks\n  llmData = {\n    polished_title: original.original_title,\n    summary: 'Summary unavailable.',\n    why_matters: 'Analysis unavailable.',\n    agency_relevance_score: 3\n  };\n}\n\nreturn [{\n  json: {\n    ...original,\n    polished_title: llmData.polished_title || original.original_title,\n    summary: llmData.summary || 'Summary unavailable.',\n    why_matters: llmData.why_matters || 'Analysis unavailable.',\n    agency_relevance_score: parseInt(llmData.agency_relevance_score) || 3\n  }\n}];"
+      },
+      "id": "parse-llm",
+      "name": "Parse LLM Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2860, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ranking and capping\nconst items = $input.all();\nconst maxPerGenre = 6;\nconst maxTotal = 60;\n\n// Group by genre\nconst byGenre = {};\nfor (const item of items) {\n  const genre = item.json.genre;\n  if (!byGenre[genre]) byGenre[genre] = [];\n  byGenre[genre].push(item);\n}\n\n// Sort each genre by agency relevance (desc) then recency (desc)\nfor (const genre in byGenre) {\n  byGenre[genre].sort((a, b) => {\n    // First by agency relevance score (higher is better)\n    const scoreA = a.json.agency_relevance_score || 0;\n    const scoreB = b.json.agency_relevance_score || 0;\n    if (scoreB !== scoreA) return scoreB - scoreA;\n    \n    // Then by recency (newer is better)\n    const dateA = new Date(a.json.published_at || 0);\n    const dateB = new Date(b.json.published_at || 0);\n    return dateB - dateA;\n  });\n}\n\n// Apply caps and assign ranks\nconst results = [];\nlet overallRank = 0;\n\nfor (const genre in byGenre) {\n  const genreStories = byGenre[genre].slice(0, maxPerGenre);\n  genreStories.forEach((item, index) => {\n    overallRank++;\n    if (overallRank <= maxTotal) {\n      results.push({\n        json: {\n          ...item.json,\n          genre_rank: index + 1,\n          overall_rank: overallRank\n        }\n      });\n    }\n  });\n}\n\n// Mark top 5 as top signals\nresults.sort((a, b) => {\n  const scoreA = a.json.agency_relevance_score || 0;\n  const scoreB = b.json.agency_relevance_score || 0;\n  if (scoreB !== scoreA) return scoreB - scoreA;\n  return new Date(b.json.published_at || 0) - new Date(a.json.published_at || 0);\n});\n\nresults.slice(0, 5).forEach(item => {\n  item.json.is_top_signal = true;\n});\n\n// Re-sort by genre for output\nresults.sort((a, b) => {\n  if (a.json.genre < b.json.genre) return -1;\n  if (a.json.genre > b.json.genre) return 1;\n  return a.json.genre_rank - b.json.genre_rank;\n});\n\nreturn results;"
+      },
+      "id": "rank-and-cap",
+      "name": "Rank & Cap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3080, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO stories (\n  client_id, run_id, original_url, canonical_url, genre, source_name,\n  original_title, polished_title, summary, why_matters, article_body,\n  published_at, publish_date_source, publish_date_confidence,\n  agency_relevance_score, dedupe_key, title_normalized, content_fingerprint,\n  word_count, genre_rank, overall_rank, is_top_signal\n) VALUES (\n  '{{ $json.client_id }}',\n  '{{ $json.run_id }}',\n  '{{ $json.url.replace(/'/g, \"''\") }}',\n  '{{ $json.canonical_url.replace(/'/g, \"''\") }}',\n  '{{ $json.genre }}',\n  '{{ ($json.source_name || \"\").replace(/'/g, \"''\") }}',\n  '{{ ($json.original_title || \"\").replace(/'/g, \"''\").substring(0, 500) }}',\n  '{{ ($json.polished_title || \"\").replace(/'/g, \"''\").substring(0, 500) }}',\n  '{{ ($json.summary || \"\").replace(/'/g, \"''\") }}',\n  '{{ ($json.why_matters || \"\").replace(/'/g, \"''\") }}',\n  '{{ ($json.article_body || \"\").replace(/'/g, \"''\").substring(0, 10000) }}',\n  '{{ $json.published_at }}',\n  '{{ $json.publish_date_source }}',\n  {{ $json.publish_date_confidence || 0 }},\n  {{ $json.agency_relevance_score || 3 }},\n  '{{ $json.dedupe_key }}',\n  '{{ ($json.title_normalized || \"\").replace(/'/g, \"''\").substring(0, 500) }}',\n  '{{ $json.content_fingerprint }}',\n  {{ $json.word_count || 0 }},\n  {{ $json.genre_rank || 0 }},\n  {{ $json.overall_rank || 0 }},\n  {{ $json.is_top_signal || false }}\n)\nON CONFLICT (client_id, run_id, dedupe_key) DO UPDATE SET\n  polished_title = EXCLUDED.polished_title,\n  summary = EXCLUDED.summary,\n  why_matters = EXCLUDED.why_matters,\n  agency_relevance_score = EXCLUDED.agency_relevance_score,\n  genre_rank = EXCLUDED.genre_rank,\n  overall_rank = EXCLUDED.overall_rank,\n  is_top_signal = EXCLUDED.is_top_signal,\n  updated_at = NOW()",
+        "options": {}
+      },
+      "id": "store-story",
+      "name": "Store Story",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3300, 0],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all stories for email generation\nconst allStories = $input.all().map(item => item.json);\n\n// Get client info from earlier in workflow\nconst client = $('Loop Over Clients').first().json;\nconst run = $('Create Run Record').first().json;\n\n// Genre colors mapping\nconst genreColors = {\n  'Office Equipment & Technology': '#2563eb',\n  'Food & Drink': '#dc2626',\n  'Telecommunications & Internet': '#7c3aed',\n  'Healthcare': '#059669',\n  'Education': '#0891b2',\n  'Tobacco & E-cigarettes': '#57534e',\n  'Charity & Nonprofit': '#db2777',\n  'Fashion': '#c026d3',\n  'Retail': '#ea580c',\n  'Professional & Business Services': '#4f46e5',\n  'Property & Construction': '#ca8a04',\n  'Agencies': '#0d9488',\n  'Entertainment': '#e11d48',\n  'Transportation & Logistics': '#1d4ed8',\n  'Consumer Electronics': '#6366f1',\n  'Travel & Tourism': '#0284c7',\n  'Financial': '#15803d',\n  'Utilities & Energy': '#a16207',\n  'Leisure & Hospitality': '#be185d',\n  'Media & Publishing': '#9333ea',\n  'Government & Public Sector': '#1e40af',\n  'Cosmetics & Personal Care': '#ec4899',\n  'Home & Garden': '#65a30d',\n  'Automotive': '#b91c1c',\n  'Manufacturing & Industrial': '#475569',\n  'Household Consumer Goods': '#d97706'\n};\n\n// Get top signals\nconst topSignals = allStories\n  .filter(s => s.is_top_signal)\n  .slice(0, 5);\n\n// Group stories by genre\nconst byGenre = {};\nfor (const story of allStories) {\n  if (!byGenre[story.genre]) byGenre[story.genre] = [];\n  byGenre[story.genre].push(story);\n}\n\n// Format date for UK\nconst today = new Date();\nconst dateStr = today.toLocaleDateString('en-GB', {\n  weekday: 'long',\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric',\n  timeZone: 'Europe/London'\n});\n\n// Build email data\nreturn [{\n  json: {\n    client,\n    run,\n    dateStr,\n    storyCount: allStories.length,\n    topSignals,\n    storiesByGenre: byGenre,\n    genreColors,\n    recipients: client.recipients || []\n  }\n}];"
+      },
+      "id": "aggregate-for-email",
+      "name": "Aggregate for Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3520, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate HTML email\nconst data = $input.first().json;\nconst { dateStr, storyCount, topSignals, storiesByGenre, genreColors, client } = data;\n\n// No-news variants\nconst noNewsVariants = [\n  \"Today's scan found no stories meeting our quality criteria within the 24-hour window. We'll be back tomorrow with fresh insights.\",\n  \"Our filters didn't surface any qualifying stories today. Sometimes quiet news days happen—we'll return tomorrow with the latest.\",\n  \"No stories passed our quality threshold today. Rest assured, we're monitoring continuously and will deliver tomorrow's brief as usual.\",\n  \"Today's news cycle didn't yield stories meeting our standards. We maintain strict criteria to ensure you only receive relevant, high-quality content.\",\n  \"A rare quiet day in our monitored sources. Our automated checks continue around the clock—expect your next brief tomorrow at 07:00.\",\n  \"No qualifying content today. Our multi-tier validation ensures quality over quantity. Tomorrow's brief will arrive on schedule.\",\n  \"Today's sources didn't produce content meeting our publication criteria. Quality assurance remains our priority—see you tomorrow.\"\n];\n\n// Select variant based on day of year for rotation\nconst dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24));\nconst variant = noNewsVariants[dayOfYear % noNewsVariants.length];\n\nlet html = `\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>44 News Automation - Morning Brief</title>\n  <style>\n    body {\n      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\n      line-height: 1.6;\n      color: #003d96;\n      background-color: #f3feff;\n      margin: 0;\n      padding: 0;\n    }\n    .container {\n      max-width: 680px;\n      margin: 0 auto;\n      padding: 20px;\n    }\n    .header {\n      text-align: center;\n      padding: 30px 20px;\n      background: linear-gradient(135deg, #003d96 0%, #0056b3 100%);\n      color: white;\n      border-radius: 12px 12px 0 0;\n    }\n    .header h1 {\n      margin: 0 0 10px 0;\n      font-size: 28px;\n      font-weight: 700;\n    }\n    .header .date {\n      font-size: 16px;\n      opacity: 0.9;\n    }\n    .content {\n      background: white;\n      padding: 30px;\n      border-radius: 0 0 12px 12px;\n      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);\n    }\n    .top-signals {\n      background: #f8fafc;\n      border-left: 4px solid #003d96;\n      padding: 20px;\n      margin-bottom: 30px;\n      border-radius: 0 8px 8px 0;\n    }\n    .top-signals h2 {\n      margin: 0 0 15px 0;\n      font-size: 18px;\n      color: #003d96;\n    }\n    .top-signals ul {\n      margin: 0;\n      padding-left: 20px;\n    }\n    .top-signals li {\n      margin-bottom: 8px;\n    }\n    .top-signals a {\n      color: #003d96;\n      text-decoration: none;\n    }\n    .top-signals a:hover {\n      text-decoration: underline;\n    }\n    .genre-section {\n      margin-bottom: 30px;\n    }\n    .genre-header {\n      color: white;\n      padding: 12px 20px;\n      border-radius: 8px;\n      margin-bottom: 15px;\n      font-size: 16px;\n      font-weight: 600;\n    }\n    .story-card {\n      background: #f8fafc;\n      border-radius: 8px;\n      padding: 20px;\n      margin-bottom: 15px;\n      border-left: 4px solid #e2e8f0;\n    }\n    .story-card h3 {\n      margin: 0 0 10px 0;\n      font-size: 17px;\n    }\n    .story-card h3 a {\n      color: #003d96;\n      text-decoration: none;\n    }\n    .story-card h3 a:hover {\n      text-decoration: underline;\n    }\n    .story-card .source {\n      font-size: 12px;\n      color: #64748b;\n      margin-bottom: 10px;\n    }\n    .story-card .summary {\n      font-size: 14px;\n      color: #334155;\n      margin-bottom: 12px;\n    }\n    .story-card .why-matters {\n      font-size: 13px;\n      color: #475569;\n      background: #e0f2fe;\n      padding: 12px;\n      border-radius: 6px;\n      border-left: 3px solid #0284c7;\n    }\n    .story-card .why-matters strong {\n      color: #0369a1;\n    }\n    .footer {\n      text-align: center;\n      padding: 20px;\n      color: #64748b;\n      font-size: 12px;\n    }\n    .no-news {\n      text-align: center;\n      padding: 40px 20px;\n      color: #64748b;\n    }\n    @media (max-width: 600px) {\n      .container {\n        padding: 10px;\n      }\n      .header {\n        padding: 20px 15px;\n      }\n      .header h1 {\n        font-size: 22px;\n      }\n      .content {\n        padding: 20px 15px;\n      }\n    }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>44 News Automation</h1>\n      <div class=\"date\">Morning Brief — ${dateStr}</div>\n    </div>\n    <div class=\"content\">\n`;\n\nif (storyCount === 0) {\n  html += `\n      <div class=\"no-news\">\n        <p>${variant}</p>\n      </div>\n`;\n} else {\n  // Top Signals\n  if (topSignals.length > 0) {\n    html += `\n      <div class=\"top-signals\">\n        <h2>Top Signals</h2>\n        <ul>\n`;\n    for (const signal of topSignals) {\n      html += `          <li><a href=\"${signal.canonical_url}\">${signal.polished_title}</a></li>\\n`;\n    }\n    html += `\n        </ul>\n      </div>\n`;\n  }\n\n  // Stories by genre\n  const genres = Object.keys(storiesByGenre).sort();\n  for (const genre of genres) {\n    const stories = storiesByGenre[genre];\n    const color = genreColors[genre] || '#003d96';\n    \n    html += `\n      <div class=\"genre-section\">\n        <div class=\"genre-header\" style=\"background-color: ${color};\">${genre}</div>\n`;\n    \n    for (const story of stories) {\n      html += `\n        <div class=\"story-card\">\n          <h3><a href=\"${story.canonical_url}\">${story.polished_title}</a></h3>\n          <div class=\"source\">${story.source_name || 'Unknown source'}</div>\n          <div class=\"summary\">${story.summary}</div>\n          <div class=\"why-matters\"><strong>Why this matters:</strong> ${story.why_matters}</div>\n        </div>\n`;\n    }\n    \n    html += `\n      </div>\n`;\n  }\n}\n\nhtml += `\n    </div>\n    <div class=\"footer\">\n      <p>Automated by 44 News Automation</p>\n      <p>This email was generated automatically. Please do not reply.</p>\n    </div>\n  </div>\n</body>\n</html>\n`;\n\nreturn [{\n  json: {\n    ...data,\n    emailHtml: html,\n    emailSubject: `44 News Automation — Morning Brief — ${dateStr}`,\n    isNoNews: storyCount === 0,\n    noNewsVariant: storyCount === 0 ? (dayOfYear % 7) + 1 : null\n  }\n}];"
+      },
+      "id": "generate-email",
+      "name": "Generate Email HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3740, 0]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $json.recipients.join(', ') }}",
+        "subject": "={{ $json.emailSubject }}",
+        "emailType": "html",
+        "message": "={{ $json.emailHtml }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [3960, 0],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-cred",
+          "name": "IONOS SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO email_logs (client_id, run_id, subject, recipients, story_count, top_signals, genres_included, status, sent_at, is_no_news_email, no_news_variant) VALUES ('{{ $json.client.id }}', '{{ $json.run.id }}', '{{ $json.emailSubject.replace(/'/g, \"''\") }}', '{{ JSON.stringify($json.recipients) }}'::jsonb, {{ $json.storyCount }}, '{{ JSON.stringify($json.topSignals.map(s => s.polished_title)) }}'::jsonb, '{{ JSON.stringify(Object.keys($json.storiesByGenre)) }}'::jsonb, 'sent', NOW(), {{ $json.isNoNews }}, {{ $json.noNewsVariant || 'NULL' }})",
+        "options": {}
+      },
+      "id": "log-email",
+      "name": "Log Email Sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [4180, 0],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE runs SET status = 'completed', completed_at = NOW(), stories_created = (SELECT COUNT(*) FROM stories WHERE run_id = '{{ $json.run.id }}'), error_count = (SELECT COUNT(*) FROM errors WHERE run_id = '{{ $json.run.id }}'), email_sent = true, email_sent_at = NOW() WHERE id = '{{ $json.run.id }}'",
+        "options": {}
+      },
+      "id": "complete-run",
+      "name": "Complete Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [4400, 0],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $env.ADMIN_ALERT_EMAIL }}",
+        "subject": "[ALERT] 44 News Automation - Run Failed",
+        "emailType": "text",
+        "message": "The daily news automation run failed.\n\nClient: {{ $json.client?.name || 'Unknown' }}\nRun ID: {{ $json.run?.id || 'Unknown' }}\nError: {{ $json.error?.message || 'Unknown error' }}\n\nPlease check the n8n logs for more details.",
+        "options": {}
+      },
+      "id": "alert-admin",
+      "name": "Alert Admin",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [4180, 300],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-cred",
+          "name": "IONOS SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 07:00 UK": {
+      "main": [
+        [
+          {
+            "node": "Get Active Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Clients": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Clients": {
+      "main": [
+        [
+          {
+            "node": "Create Run Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Run Record": {
+      "main": [
+        [
+          {
+            "node": "Read URLs from Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read URLs from Sheet": {
+      "main": [
+        [
+          {
+            "node": "Validate Genres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Genres": {
+      "main": [
+        [
+          {
+            "node": "Batch URLs (5)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch URLs (5)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Article",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Article": {
+      "main": [
+        [
+          {
+            "node": "Extract Content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Content": {
+      "main": [
+        [
+          {
+            "node": "Validate Publish Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Publish Date": {
+      "main": [
+        [
+          {
+            "node": "Filter Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Skipped": {
+      "main": [
+        [
+          {
+            "node": "Deduplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplicate": {
+      "main": [
+        [
+          {
+            "node": "LLM Process",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Process": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Rank & Cap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rank & Cap": {
+      "main": [
+        [
+          {
+            "node": "Store Story",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Story": {
+      "main": [
+        [
+          {
+            "node": "Aggregate for Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate for Email": {
+      "main": [
+        [
+          {
+            "node": "Generate Email HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Email HTML": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Log Email Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Email Sent": {
+      "main": [
+        [
+          {
+            "node": "Complete Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Europe/London"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "44-news-automation"
+    },
+    {
+      "name": "production"
+    }
+  ],
+  "triggerCount": 1
+}
