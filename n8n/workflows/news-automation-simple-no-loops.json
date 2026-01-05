@@ -1,0 +1,323 @@
+{
+  "name": "44 News Automation - Simple (No Loops)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "trigger",
+      "name": "Daily 07:00 UK",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM clients WHERE is_active = true LIMIT 1",
+        "options": {}
+      },
+      "id": "get-client",
+      "name": "Get Client",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO runs (client_id, run_date, status, started_at) VALUES ('{{ $json.id }}', CURRENT_DATE, 'running', NOW()) ON CONFLICT (client_id, run_date, run_number) DO UPDATE SET status = 'running', started_at = NOW() RETURNING *",
+        "options": {}
+      },
+      "id": "create-run",
+      "name": "Create Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Get Client').item.json.sheet_id }}"
+        },
+        "range": "A:B",
+        "options": {
+          "headerRow": 1
+        }
+      },
+      "id": "read-sheet",
+      "name": "Read Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "maxItems": 5
+      },
+      "id": "limit-urls",
+      "name": "Limit to 5",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare URLs with metadata\nconst client = $('Get Client').first().json;\nconst run = $('Create Run').first().json;\n\nconst validGenres = [\n  'Office Equipment & Technology', 'Food & Drink', 'Telecommunications & Internet',\n  'Healthcare', 'Education', 'Tobacco & E-cigarettes', 'Charity & Nonprofit',\n  'Fashion', 'Retail', 'Professional & Business Services', 'Property & Construction',\n  'Agencies', 'Entertainment', 'Transportation & Logistics', 'Consumer Electronics',\n  'Travel & Tourism', 'Financial', 'Utilities & Energy', 'Leisure & Hospitality',\n  'Media & Publishing', 'Government & Public Sector', 'Cosmetics & Personal Care',\n  'Home & Garden', 'Automotive', 'Manufacturing & Industrial', 'Household Consumer Goods'\n];\n\nconst results = [];\nfor (const item of $input.all()) {\n  const url = (item.json.URL || '').trim();\n  const genre = (item.json.Genre || '').trim();\n  \n  if (!url || !genre || !validGenres.includes(genre)) continue;\n  \n  results.push({\n    json: {\n      homepage_url: url,\n      genre: genre,\n      client_id: client.id,\n      run_id: run.id,\n      client_name: client.name,\n      recipients: client.recipients\n    }\n  });\n}\n\nreturn results.length > 0 ? results : [{ json: { error: 'No valid URLs' } }];"
+      },
+      "id": "prepare-urls",
+      "name": "Prepare URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.homepage_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "fetch-homepage",
+      "name": "Fetch Homepage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 300],
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract articles from homepage - SIMPLE VERSION\nconst items = $input.all();\nconst allArticles = [];\n\nfor (const item of items) {\n  const homepage_url = item.json.homepage_url || '';\n  const genre = item.json.genre || '';\n  const client_id = item.json.client_id || '';\n  const run_id = item.json.run_id || '';\n  const recipients = item.json.recipients || [];\n  \n  let html = item.json.data || item.json.body || '';\n  if (typeof html !== 'string') html = '';\n  \n  // Limit HTML size\n  if (html.length > 300000) html = html.substring(0, 300000);\n  \n  let baseUrl;\n  try {\n    baseUrl = new URL(homepage_url).origin;\n  } catch (e) {\n    continue;\n  }\n  \n  // Extract links\n  const linkPattern = /href=[\"']([^\"']{10,150})[\"']/gi;\n  const found = [];\n  let match;\n  let count = 0;\n  \n  while ((match = linkPattern.exec(html)) !== null && count < 200) {\n    count++;\n    let href = match[1];\n    \n    // Skip obvious non-articles\n    if (href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) continue;\n    if (/\\.(css|js|png|jpg|gif|svg|ico|pdf|xml)$/i.test(href)) continue;\n    if (/(\\/tag\\/|\\/category\\/|\\/author\\/|\\/search|\\/login|\\/subscribe)/i.test(href)) continue;\n    if (/(facebook|twitter|linkedin|instagram|youtube)\\.com/i.test(href)) continue;\n    \n    // Resolve relative URLs\n    if (href.startsWith('/')) {\n      href = baseUrl + href;\n    } else if (!href.startsWith('http')) {\n      continue;\n    }\n    \n    // Must be same domain\n    try {\n      if (new URL(href).hostname.replace('www.', '') !== new URL(baseUrl).hostname.replace('www.', '')) continue;\n    } catch (e) { continue; }\n    \n    // Skip if it's just the homepage\n    if (href.replace(/\\/$/, '') === baseUrl.replace(/\\/$/, '')) continue;\n    \n    found.push(href);\n  }\n  \n  // Dedupe and limit\n  const unique = [...new Set(found)].slice(0, 5);\n  \n  for (const url of unique) {\n    allArticles.push({\n      json: {\n        article_url: url,\n        genre: genre,\n        client_id: client_id,\n        run_id: run_id,\n        recipients: recipients,\n        source_homepage: homepage_url\n      }\n    });\n  }\n}\n\nif (allArticles.length === 0) {\n  return [{ json: { error: true, reason: 'No articles discovered' } }];\n}\n\nreturn allArticles.slice(0, 15); // Max 15 articles total"
+      },
+      "id": "discover-articles",
+      "name": "Discover Articles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-errors",
+      "name": "Filter Errors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1760, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.article_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "fetch-article",
+      "name": "Fetch Article",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, 300],
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract article content - SIMPLE VERSION\nconst items = $input.all();\nconst articles = [];\n\nfor (const item of items) {\n  const articleUrl = item.json.article_url || '';\n  const genre = item.json.genre || '';\n  const clientId = item.json.client_id || '';\n  const runId = item.json.run_id || '';\n  const recipients = item.json.recipients || [];\n  const sourceHomepage = item.json.source_homepage || '';\n  \n  let html = item.json.data || item.json.body || '';\n  if (typeof html !== 'string' || html.length < 500) continue;\n  if (html.length > 200000) html = html.substring(0, 200000);\n  \n  // Extract title\n  let title = '';\n  const ogTitle = html.match(/property=[\"']og:title[\"'][^>]*content=[\"']([^\"']+)[\"']/i) ||\n                  html.match(/content=[\"']([^\"']+)[\"'][^>]*property=[\"']og:title[\"']/i);\n  if (ogTitle) title = ogTitle[1];\n  if (!title) {\n    const titleTag = html.match(/<title[^>]*>([^<]+)<\\/title>/i);\n    if (titleTag) title = titleTag[1].trim();\n  }\n  if (!title) continue;\n  \n  // Extract publish date\n  let publishDate = null;\n  let dateSource = null;\n  \n  // Try JSON-LD\n  const jsonLd = html.match(/\"datePublished\"\\s*:\\s*\"([^\"]+)\"/i);\n  if (jsonLd) {\n    publishDate = jsonLd[1];\n    dateSource = 'jsonld';\n  }\n  \n  // Try OpenGraph\n  if (!publishDate) {\n    const ogDate = html.match(/property=[\"']article:published_time[\"'][^>]*content=[\"']([^\"']+)[\"']/i) ||\n                   html.match(/content=[\"']([^\"']+)[\"'][^>]*property=[\"']article:published_time[\"']/i);\n    if (ogDate) {\n      publishDate = ogDate[1];\n      dateSource = 'opengraph';\n    }\n  }\n  \n  // Try time element\n  if (!publishDate) {\n    const timeEl = html.match(/<time[^>]*datetime=[\"']([^\"']+)[\"']/i);\n    if (timeEl) {\n      publishDate = timeEl[1];\n      dateSource = 'time';\n    }\n  }\n  \n  // Skip if no date found\n  if (!publishDate) continue;\n  \n  // Validate date is recent (within 7 days)\n  try {\n    const pubDate = new Date(publishDate);\n    const now = new Date();\n    const daysDiff = (now - pubDate) / (1000 * 60 * 60 * 24);\n    if (daysDiff < 0 || daysDiff > 7) continue;\n  } catch (e) { continue; }\n  \n  // Extract paragraphs for content\n  const paragraphs = [];\n  const pRegex = /<p[^>]*>([^<]{50,})<\\/p>/gi;\n  let pMatch;\n  while ((pMatch = pRegex.exec(html)) !== null && paragraphs.length < 10) {\n    const text = pMatch[1].replace(/<[^>]*>/g, '').trim();\n    if (text.length > 50) paragraphs.push(text);\n  }\n  const content = paragraphs.join(' ').substring(0, 2000);\n  if (content.length < 200) continue;\n  \n  // Extract source name\n  let sourceName = '';\n  const ogSite = html.match(/property=[\"']og:site_name[\"'][^>]*content=[\"']([^\"']+)[\"']/i);\n  if (ogSite) sourceName = ogSite[1];\n  if (!sourceName) {\n    try { sourceName = new URL(articleUrl).hostname.replace('www.', ''); } catch(e) {}\n  }\n  \n  articles.push({\n    json: {\n      url: articleUrl,\n      title: title.substring(0, 200),\n      content: content,\n      publish_date: publishDate,\n      date_source: dateSource,\n      source_name: sourceName,\n      genre: genre,\n      client_id: clientId,\n      run_id: runId,\n      recipients: recipients\n    }\n  });\n}\n\nif (articles.length === 0) {\n  return [{ json: { no_articles: true, reason: 'No valid articles extracted' } }];\n}\n\nreturn articles.slice(0, 10); // Max 10 articles"
+      },
+      "id": "extract-content",
+      "name": "Extract Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "has-title",
+              "leftValue": "={{ $json.title }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "isNotEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-valid",
+      "name": "Filter Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2420, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a news editor. Given an article, write:\n1. A polished headline (factual, not sensational)\n2. A 2-3 sentence summary\n3. A 1-2 sentence 'Why this matters' for marketing agencies\n\nRespond in JSON: {\"headline\": \"...\", \"summary\": \"...\", \"why_matters\": \"...\"}"
+            },
+            {
+              "role": "user",
+              "content": "Genre: {{ $json.genre }}\nTitle: {{ $json.title }}\nSource: {{ $json.source_name }}\n\nContent:\n{{ $json.content }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "responseFormat": "json_object"
+        }
+      },
+      "id": "ai-process",
+      "name": "AI Process",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.7,
+      "position": [2640, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine AI response with article data\nconst items = $input.all();\nconst processed = [];\n\nfor (const item of items) {\n  const original = item.json;\n  \n  let aiData = { headline: '', summary: '', why_matters: '' };\n  try {\n    const content = original.message?.content || original.text || '{}';\n    aiData = JSON.parse(content);\n  } catch (e) {\n    aiData = {\n      headline: original.title || 'Untitled',\n      summary: original.content?.substring(0, 200) || 'No summary available.',\n      why_matters: 'Relevant to the industry.'\n    };\n  }\n  \n  processed.push({\n    json: {\n      url: original.url,\n      headline: aiData.headline || original.title,\n      summary: aiData.summary || 'Summary not available.',\n      why_matters: aiData.why_matters || 'Industry relevance.',\n      source_name: original.source_name,\n      publish_date: original.publish_date,\n      genre: original.genre,\n      client_id: original.client_id,\n      run_id: original.run_id,\n      recipients: original.recipients\n    }\n  });\n}\n\nreturn processed;"
+      },
+      "id": "parse-ai",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2860, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build email HTML\nconst articles = $input.all().map(i => i.json);\n\nconst genreColors = {\n  'Office Equipment & Technology': '#2563eb',\n  'Food & Drink': '#dc2626',\n  'Telecommunications & Internet': '#7c3aed',\n  'Healthcare': '#059669',\n  'Education': '#0891b2',\n  'Charity & Nonprofit': '#db2777',\n  'Fashion': '#c026d3',\n  'Retail': '#ea580c',\n  'Professional & Business Services': '#4f46e5',\n  'Property & Construction': '#ca8a04',\n  'Agencies': '#0d9488',\n  'Entertainment': '#e11d48',\n  'Transportation & Logistics': '#1d4ed8',\n  'Consumer Electronics': '#6366f1',\n  'Travel & Tourism': '#0284c7',\n  'Financial': '#15803d',\n  'Utilities & Energy': '#a16207',\n  'Leisure & Hospitality': '#be185d',\n  'Media & Publishing': '#9333ea',\n  'Government & Public Sector': '#1e40af',\n  'Cosmetics & Personal Care': '#ec4899',\n  'Home & Garden': '#65a30d',\n  'Automotive': '#b91c1c',\n  'Manufacturing & Industrial': '#475569',\n  'Household Consumer Goods': '#d97706'\n};\n\nconst today = new Date().toLocaleDateString('en-GB', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Europe/London'\n});\n\nlet recipients = [];\nif (articles.length > 0 && articles[0].recipients) {\n  recipients = articles[0].recipients;\n}\n\n// Group by genre\nconst byGenre = {};\nfor (const a of articles) {\n  if (!byGenre[a.genre]) byGenre[a.genre] = [];\n  byGenre[a.genre].push(a);\n}\n\n// Build HTML\nlet html = `<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>44 News</title></head><body style=\"font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f3feff; margin: 0; padding: 20px;\"><div style=\"max-width: 600px; margin: 0 auto;\"><div style=\"background: linear-gradient(135deg, #003d96, #0056b3); color: white; padding: 30px; text-align: center; border-radius: 12px 12px 0 0;\"><h1 style=\"margin: 0;\">44 News Automation</h1><p style=\"margin: 10px 0 0; opacity: 0.9;\">Morning Brief — ${today}</p></div><div style=\"background: white; padding: 30px; border-radius: 0 0 12px 12px;\">`;\n\nif (articles.length === 0) {\n  html += `<p style=\"text-align: center; color: #666;\">No qualifying stories found today. We'll be back tomorrow.</p>`;\n} else {\n  for (const genre of Object.keys(byGenre).sort()) {\n    const color = genreColors[genre] || '#003d96';\n    html += `<div style=\"background: ${color}; color: white; padding: 12px 20px; border-radius: 8px; margin: 20px 0 15px; font-weight: 600;\">${genre}</div>`;\n    \n    for (const article of byGenre[genre]) {\n      html += `<div style=\"background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid ${color};\">`;\n      html += `<h3 style=\"margin: 0 0 10px; font-size: 17px;\"><a href=\"${article.url}\" style=\"color: #003d96; text-decoration: none;\">${article.headline}</a></h3>`;\n      html += `<p style=\"font-size: 12px; color: #666; margin: 0 0 10px;\">${article.source_name}</p>`;\n      html += `<p style=\"font-size: 14px; color: #333; margin: 0 0 12px;\">${article.summary}</p>`;\n      html += `<div style=\"background: #e0f2fe; padding: 12px; border-radius: 6px; border-left: 3px solid #0284c7;\"><strong style=\"color: #0369a1;\">Why this matters:</strong> <span style=\"color: #475569; font-size: 13px;\">${article.why_matters}</span></div>`;\n      html += `</div>`;\n    }\n  }\n}\n\nhtml += `</div><p style=\"text-align: center; color: #666; font-size: 12px; margin-top: 20px;\">Automated by 44 News Automation</p></div></body></html>`;\n\nreturn [{\n  json: {\n    emailHtml: html,\n    emailSubject: `44 News Automation — Morning Brief — ${today}`,\n    recipients: recipients,\n    storyCount: articles.length,\n    client_id: articles[0]?.client_id,\n    run_id: articles[0]?.run_id\n  }\n}];"
+      },
+      "id": "build-email",
+      "name": "Build Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3080, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "news@44automationltd.com",
+        "toEmail": "={{ $json.recipients.join(', ') }}",
+        "subject": "={{ $json.emailSubject }}",
+        "emailType": "html",
+        "message": "={{ $json.emailHtml }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [3300, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE runs SET status = 'completed', completed_at = NOW(), stories_created = {{ $json.storyCount }}, email_sent = true, email_sent_at = NOW() WHERE id = '{{ $json.run_id }}'",
+        "options": {}
+      },
+      "id": "complete-run",
+      "name": "Complete Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3520, 300]
+    }
+  ],
+  "connections": {
+    "Daily 07:00 UK": {
+      "main": [[{ "node": "Get Client", "type": "main", "index": 0 }]]
+    },
+    "Get Client": {
+      "main": [[{ "node": "Create Run", "type": "main", "index": 0 }]]
+    },
+    "Create Run": {
+      "main": [[{ "node": "Read Sheet", "type": "main", "index": 0 }]]
+    },
+    "Read Sheet": {
+      "main": [[{ "node": "Limit to 5", "type": "main", "index": 0 }]]
+    },
+    "Limit to 5": {
+      "main": [[{ "node": "Prepare URLs", "type": "main", "index": 0 }]]
+    },
+    "Prepare URLs": {
+      "main": [[{ "node": "Fetch Homepage", "type": "main", "index": 0 }]]
+    },
+    "Fetch Homepage": {
+      "main": [[{ "node": "Discover Articles", "type": "main", "index": 0 }]]
+    },
+    "Discover Articles": {
+      "main": [[{ "node": "Filter Errors", "type": "main", "index": 0 }]]
+    },
+    "Filter Errors": {
+      "main": [
+        [{ "node": "Fetch Article", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Fetch Article": {
+      "main": [[{ "node": "Extract Content", "type": "main", "index": 0 }]]
+    },
+    "Extract Content": {
+      "main": [[{ "node": "Filter Valid", "type": "main", "index": 0 }]]
+    },
+    "Filter Valid": {
+      "main": [
+        [{ "node": "AI Process", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "AI Process": {
+      "main": [[{ "node": "Parse AI Response", "type": "main", "index": 0 }]]
+    },
+    "Parse AI Response": {
+      "main": [[{ "node": "Build Email", "type": "main", "index": 0 }]]
+    },
+    "Build Email": {
+      "main": [[{ "node": "Send Email", "type": "main", "index": 0 }]]
+    },
+    "Send Email": {
+      "main": [[{ "node": "Complete Run", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Europe/London"
+  }
+}
