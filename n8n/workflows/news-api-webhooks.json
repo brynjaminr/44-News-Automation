@@ -1,0 +1,489 @@
+{
+  "name": "44 News - API Webhooks",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "run-digest",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-run",
+      "name": "Run Digest Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 100],
+      "webhookId": "run-digest"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-preview",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-preview",
+      "name": "Preview Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 400],
+      "webhookId": "generate-preview"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-test-email",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-test-email",
+      "name": "Test Email Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 700],
+      "webhookId": "send-test-email"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT s.*, us.max_per_source, us.max_total_articles, us.summary_tone, us.why_matters_focus, us.recipient_email, us.email_greeting, us.email_footer FROM sources s JOIN user_settings us ON s.user_id = us.user_id WHERE s.user_id = '{{ $json.body.user_id }}' AND s.is_active = true",
+        "options": {}
+      },
+      "id": "get-sources",
+      "name": "Get Active Sources",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [250, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO digests (user_id, status) VALUES ('{{ $json.body.user_id }}', 'processing') RETURNING *",
+        "options": {}
+      },
+      "id": "create-digest",
+      "name": "Create Digest",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [500, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare sources for processing\nconst items = $input.all();\nconst settings = items[0]?.json || {};\n\nconst sources = items.map(item => ({\n  json: {\n    source_id: item.json.id,\n    source_name: item.json.name,\n    url: item.json.url,\n    genre: item.json.genre,\n    user_id: item.json.user_id,\n    max_per_source: item.json.max_per_source || 15,\n    max_total: item.json.max_total_articles || 200,\n    summary_tone: item.json.summary_tone || 'Professional',\n    why_focus: item.json.why_matters_focus || 'Business Focus',\n    recipient_email: item.json.recipient_email,\n    email_greeting: item.json.email_greeting,\n    email_footer: item.json.email_footer,\n    digest_id: $('Create Digest').first().json.id\n  }\n}));\n\nreturn sources.slice(0, 20); // Limit to 20 sources"
+      },
+      "id": "prepare-sources",
+      "name": "Prepare Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 100]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "fetch-source",
+      "name": "Fetch Source Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 100],
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Discover article links from homepage\nconst items = $input.all();\nconst allArticles = [];\n\nfor (const item of items) {\n  const sourceUrl = item.json.url || '';\n  const sourceName = item.json.source_name || '';\n  const genre = item.json.genre || '';\n  const maxPerSource = item.json.max_per_source || 15;\n  const metadata = {\n    source_id: item.json.source_id,\n    user_id: item.json.user_id,\n    digest_id: item.json.digest_id,\n    summary_tone: item.json.summary_tone,\n    why_focus: item.json.why_focus,\n    recipient_email: item.json.recipient_email,\n    email_greeting: item.json.email_greeting,\n    email_footer: item.json.email_footer,\n    max_total: item.json.max_total\n  };\n  \n  let html = item.json.data || item.json.body || '';\n  if (typeof html !== 'string') continue;\n  if (html.length > 300000) html = html.substring(0, 300000);\n  \n  let baseUrl;\n  try {\n    baseUrl = new URL(sourceUrl).origin;\n  } catch (e) { continue; }\n  \n  // Extract links\n  const linkPattern = /href=[\"']([^\"']{10,200})[\"']/gi;\n  const found = [];\n  let match;\n  \n  while ((match = linkPattern.exec(html)) !== null && found.length < 50) {\n    let href = match[1];\n    \n    // Skip non-articles\n    if (href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) continue;\n    if (/\\.(css|js|png|jpg|gif|svg|ico|pdf|xml|rss)$/i.test(href)) continue;\n    if (/(\\/tag\\/|\\/category\\/|\\/author\\/|\\/search|\\/login|\\/subscribe|\\/about|\\/contact|\\/privacy|\\/terms)/i.test(href)) continue;\n    if (/(facebook|twitter|linkedin|instagram|youtube|tiktok)\\.com/i.test(href)) continue;\n    \n    // Resolve relative URLs\n    if (href.startsWith('/')) {\n      href = baseUrl + href;\n    } else if (!href.startsWith('http')) {\n      continue;\n    }\n    \n    // Must be same domain or subdomain\n    try {\n      const hrefHost = new URL(href).hostname.replace('www.', '');\n      const baseHost = new URL(baseUrl).hostname.replace('www.', '');\n      if (!hrefHost.includes(baseHost) && !baseHost.includes(hrefHost)) continue;\n    } catch (e) { continue; }\n    \n    // Skip homepage\n    if (href.replace(/\\/$/, '') === baseUrl.replace(/\\/$/, '')) continue;\n    \n    found.push(href);\n  }\n  \n  // Dedupe and limit\n  const unique = [...new Set(found)].slice(0, maxPerSource);\n  \n  for (const url of unique) {\n    allArticles.push({\n      json: {\n        article_url: url,\n        source_name: sourceName,\n        genre: genre,\n        ...metadata\n      }\n    });\n  }\n}\n\nif (allArticles.length === 0) {\n  return [{ json: { error: true, reason: 'No articles found' } }];\n}\n\n// Apply max total limit\nconst maxTotal = allArticles[0]?.json.max_total || 200;\nreturn allArticles.slice(0, Math.min(maxTotal, 50)); // Cap at 50 for n8n Cloud"
+      },
+      "id": "discover-links",
+      "name": "Discover Article Links",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "has-url",
+              "leftValue": "={{ $json.article_url }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "isNotEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-valid-links",
+      "name": "Filter Valid Links",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1500, 100]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.article_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "fetch-article",
+      "name": "Fetch Article",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1750, 100],
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract article content\nconst items = $input.all();\nconst articles = [];\n\nfor (const item of items) {\n  const articleUrl = item.json.article_url || '';\n  const sourceName = item.json.source_name || '';\n  const genre = item.json.genre || '';\n  const metadata = {\n    source_id: item.json.source_id,\n    user_id: item.json.user_id,\n    digest_id: item.json.digest_id,\n    summary_tone: item.json.summary_tone,\n    why_focus: item.json.why_focus,\n    recipient_email: item.json.recipient_email,\n    email_greeting: item.json.email_greeting,\n    email_footer: item.json.email_footer\n  };\n  \n  let html = item.json.data || item.json.body || '';\n  if (typeof html !== 'string' || html.length < 500) continue;\n  if (html.length > 200000) html = html.substring(0, 200000);\n  \n  // Extract title\n  let title = '';\n  const ogTitle = html.match(/property=[\"']og:title[\"'][^>]*content=[\"']([^\"']+)[\"']/i) ||\n                  html.match(/content=[\"']([^\"']+)[\"'][^>]*property=[\"']og:title[\"']/i);\n  if (ogTitle) title = ogTitle[1];\n  if (!title) {\n    const h1 = html.match(/<h1[^>]*>([^<]+)<\\/h1>/i);\n    if (h1) title = h1[1].trim();\n  }\n  if (!title) {\n    const titleTag = html.match(/<title[^>]*>([^<]+)<\\/title>/i);\n    if (titleTag) title = titleTag[1].trim();\n  }\n  if (!title) continue;\n  \n  // Clean title\n  title = title.replace(/\\s*[|\\-–—]\\s*[^|\\-–—]*$/, '').trim();\n  \n  // Extract publish date\n  let publishDate = null;\n  \n  const jsonLd = html.match(/\"datePublished\"\\s*:\\s*\"([^\"]+)\"/i);\n  if (jsonLd) publishDate = jsonLd[1];\n  \n  if (!publishDate) {\n    const ogDate = html.match(/property=[\"']article:published_time[\"'][^>]*content=[\"']([^\"']+)[\"']/i) ||\n                   html.match(/content=[\"']([^\"']+)[\"'][^>]*property=[\"']article:published_time[\"']/i);\n    if (ogDate) publishDate = ogDate[1];\n  }\n  \n  if (!publishDate) {\n    const timeEl = html.match(/<time[^>]*datetime=[\"']([^\"']+)[\"']/i);\n    if (timeEl) publishDate = timeEl[1];\n  }\n  \n  // Validate date is recent (within 7 days)\n  if (publishDate) {\n    try {\n      const pubDate = new Date(publishDate);\n      const now = new Date();\n      const daysDiff = (now - pubDate) / (1000 * 60 * 60 * 24);\n      if (daysDiff < 0 || daysDiff > 7) continue;\n    } catch (e) { }\n  }\n  \n  // Extract paragraphs\n  const paragraphs = [];\n  const pRegex = /<p[^>]*>([^<]{30,})<\\/p>/gi;\n  let pMatch;\n  while ((pMatch = pRegex.exec(html)) !== null && paragraphs.length < 15) {\n    const text = pMatch[1].replace(/<[^>]*>/g, '').trim();\n    if (text.length > 30) paragraphs.push(text);\n  }\n  const content = paragraphs.join(' ').substring(0, 3000);\n  if (content.length < 100) continue;\n  \n  articles.push({\n    json: {\n      url: articleUrl,\n      title: title.substring(0, 250),\n      content: content,\n      source_name: sourceName,\n      genre: genre,\n      published_at: publishDate,\n      ...metadata\n    }\n  });\n}\n\nif (articles.length === 0) {\n  return [{ json: { no_articles: true } }];\n}\n\nreturn articles.slice(0, 30); // Max 30 for AI processing"
+      },
+      "id": "extract-content",
+      "name": "Extract Article Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "has-title",
+              "leftValue": "={{ $json.title }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "isNotEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-extracted",
+      "name": "Filter Extracted",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2250, 100]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a news editor. Given an article, write:\n1. A polished headline (factual, clear)\n2. A 2-3 sentence summary\n3. A 1-2 sentence 'Why this matters' explanation\n\nTone: {{ $json.summary_tone || 'Professional' }}\nFocus: {{ $json.why_focus || 'Business Focus' }}\n\nRespond in JSON: {\"headline\": \"...\", \"summary\": \"...\", \"why_matters\": \"...\"}"
+            },
+            {
+              "role": "user",
+              "content": "Genre: {{ $json.genre }}\nTitle: {{ $json.title }}\nSource: {{ $json.source_name }}\n\nContent:\n{{ $json.content }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "responseFormat": "json_object"
+        }
+      },
+      "id": "ai-summarize",
+      "name": "AI Summarize",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.7,
+      "position": [2500, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response and combine with article data\nconst items = $input.all();\nconst processed = [];\n\nfor (const item of items) {\n  const original = item.json;\n  \n  let aiData = {};\n  try {\n    const content = original.message?.content || original.text || '{}';\n    aiData = JSON.parse(content);\n  } catch (e) {\n    aiData = {\n      headline: original.title,\n      summary: original.content?.substring(0, 200) + '...',\n      why_matters: 'Relevant industry news.'\n    };\n  }\n  \n  processed.push({\n    json: {\n      url: original.url,\n      headline: aiData.headline || original.title,\n      summary: aiData.summary || 'Summary not available.',\n      why_matters: aiData.why_matters || 'Industry relevance.',\n      source_name: original.source_name,\n      genre: original.genre,\n      published_at: original.published_at,\n      source_id: original.source_id,\n      user_id: original.user_id,\n      digest_id: original.digest_id,\n      recipient_email: original.recipient_email,\n      email_greeting: original.email_greeting,\n      email_footer: original.email_footer\n    }\n  });\n}\n\nreturn processed;"
+      },
+      "id": "parse-ai",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2750, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build email HTML matching Base44 style\nconst articles = $input.all().map(i => i.json);\n\nconst genreColors = {\n  'Office Equipment & Technology': '#2563eb',\n  'Food & Drink': '#dc2626',\n  'Telecommunications & Internet': '#7c3aed',\n  'Healthcare': '#059669',\n  'Education': '#0891b2',\n  'Tobacco & E-cigarettes': '#78716c',\n  'Charity & Nonprofit': '#db2777',\n  'Fashion': '#c026d3',\n  'Retail': '#ea580c',\n  'Professional & Business Services': '#4f46e5',\n  'Property & Construction': '#ca8a04',\n  'Agencies': '#0d9488',\n  'Entertainment': '#e11d48',\n  'Transportation & Logistics': '#1d4ed8',\n  'Consumer Electronics': '#6366f1',\n  'Travel & Tourism': '#0284c7',\n  'Financial': '#15803d',\n  'Utilities & Energy': '#a16207',\n  'Leisure & Hospitality': '#be185d',\n  'Media & Publishing': '#9333ea',\n  'Government & Public Sector': '#1e40af',\n  'Cosmetics & Personal Care': '#ec4899',\n  'Home & Garden': '#65a30d',\n  'Automotive': '#b91c1c',\n  'Manufacturing & Industrial': '#64748b',\n  'Household Consumer Goods': '#f59e0b'\n};\n\nconst today = new Date().toLocaleDateString('en-GB', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Europe/London'\n});\n\nconst firstArticle = articles[0] || {};\nconst recipientEmail = firstArticle.recipient_email || '';\nconst emailGreeting = firstArticle.email_greeting || 'Good morning! Here\\'s your daily news digest.';\nconst emailFooter = firstArticle.email_footer || 'Have a great day!';\nconst digestId = firstArticle.digest_id;\nconst userId = firstArticle.user_id;\n\n// Group by genre\nconst byGenre = {};\nfor (const a of articles) {\n  if (!byGenre[a.genre]) byGenre[a.genre] = [];\n  byGenre[a.genre].push(a);\n}\n\n// Build HTML\nlet html = `<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>44 News Digest</title></head><body style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3feff; margin: 0; padding: 20px;\">`;\nhtml += `<div style=\"max-width: 650px; margin: 0 auto;\">`;\n\n// Header\nhtml += `<div style=\"background: linear-gradient(135deg, #003d96, #0056b3); color: white; padding: 35px; text-align: center; border-radius: 16px 16px 0 0;\">`;\nhtml += `<h1 style=\"margin: 0; font-size: 28px; font-weight: 700;\">44 News Automation</h1>`;\nhtml += `<p style=\"margin: 12px 0 0; opacity: 0.9; font-size: 16px;\">Morning Digest — ${today}</p>`;\nhtml += `</div>`;\n\n// Content\nhtml += `<div style=\"background: white; padding: 35px; border-radius: 0 0 16px 16px;\">`;\n\n// Greeting\nhtml += `<p style=\"font-size: 16px; color: #333; margin: 0 0 25px;\">${emailGreeting}</p>`;\n\nif (articles.length === 0) {\n  html += `<div style=\"text-align: center; padding: 40px; color: #666;\"><p>No qualifying stories found today.</p><p>We'll be back tomorrow with fresh content.</p></div>`;\n} else {\n  for (const genre of Object.keys(byGenre).sort()) {\n    const color = genreColors[genre] || '#003d96';\n    html += `<div style=\"margin: 25px 0 18px;\">`;\n    html += `<span style=\"background: ${color}; color: white; padding: 8px 16px; border-radius: 6px; font-weight: 600; font-size: 14px;\">${genre}</span>`;\n    html += `</div>`;\n    \n    for (const article of byGenre[genre]) {\n      html += `<div style=\"background: #f8fafc; padding: 22px; border-radius: 10px; margin-bottom: 16px; border-left: 4px solid ${color};\">`;\n      html += `<h3 style=\"margin: 0 0 8px; font-size: 18px; line-height: 1.4;\"><a href=\"${article.url}\" style=\"color: #003d96; text-decoration: none;\" target=\"_blank\">${article.headline}</a></h3>`;\n      html += `<p style=\"font-size: 12px; color: #888; margin: 0 0 12px;\">from ${article.source_name}</p>`;\n      html += `<p style=\"font-size: 15px; color: #444; margin: 0 0 15px; line-height: 1.5;\">${article.summary}</p>`;\n      html += `<div style=\"background: #e0f2fe; padding: 14px; border-radius: 8px; border-left: 3px solid #0284c7;\">`;\n      html += `<p style=\"margin: 0; font-size: 13px;\"><strong style=\"color: #0369a1;\">WHY THIS MATTERS</strong></p>`;\n      html += `<p style=\"margin: 6px 0 0; color: #475569; font-size: 14px; line-height: 1.4;\">${article.why_matters}</p>`;\n      html += `</div></div>`;\n    }\n  }\n}\n\n// Footer\nhtml += `<hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;\">`;\nhtml += `<p style=\"font-size: 14px; color: #666; margin: 0;\">${emailFooter}</p>`;\nhtml += `</div>`;\n\n// Branding footer\nhtml += `<p style=\"text-align: center; color: #999; font-size: 12px; margin-top: 20px;\">Powered by 44 News Automation</p>`;\nhtml += `</div></body></html>`;\n\nreturn [{\n  json: {\n    emailHtml: html,\n    emailSubject: `44 News Digest — ${today}`,\n    recipient_email: recipientEmail,\n    article_count: articles.length,\n    source_count: [...new Set(articles.map(a => a.source_name))].length,\n    digest_id: digestId,\n    user_id: userId,\n    articles: articles\n  }\n}];"
+      },
+      "id": "build-email",
+      "name": "Build Email HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3000, 100]
+    },
+    {
+      "parameters": {
+        "fromEmail": "news@44automationltd.com",
+        "toEmail": "={{ $json.recipient_email }}",
+        "subject": "={{ $json.emailSubject }}",
+        "emailType": "html",
+        "message": "={{ $json.emailHtml }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [3250, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE digests SET status = 'sent', sent_at = NOW(), article_count = {{ $json.article_count }}, source_count = {{ $json.source_count }} WHERE id = '{{ $json.digest_id }}'",
+        "options": {}
+      },
+      "id": "update-digest",
+      "name": "Update Digest Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3500, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, digest_id: $json.digest_id, articles: $('Build Email HTML').first().json.article_count }) }}"
+      },
+      "id": "respond-run",
+      "name": "Respond Run Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [3750, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT s.*, us.max_per_source, us.max_total_articles, us.summary_tone, us.why_matters_focus FROM sources s JOIN user_settings us ON s.user_id = us.user_id WHERE s.user_id = '{{ $json.body.user_id }}' AND s.is_active = true LIMIT 10",
+        "options": {}
+      },
+      "id": "get-preview-sources",
+      "name": "Get Preview Sources",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [250, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare sources for preview (limited)\nconst items = $input.all();\nreturn items.slice(0, 5).map(item => ({\n  json: {\n    source_id: item.json.id,\n    source_name: item.json.name,\n    url: item.json.url,\n    genre: item.json.genre,\n    user_id: item.json.user_id,\n    max_per_source: Math.min(item.json.max_per_source || 15, 3),\n    summary_tone: item.json.summary_tone || 'Professional',\n    why_focus: item.json.why_matters_focus || 'Business Focus',\n    is_preview: true\n  }\n}));"
+      },
+      "id": "prepare-preview",
+      "name": "Prepare Preview Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": { "response": { "fullResponse": false, "responseFormat": "text" } },
+          "timeout": 12000
+        }
+      },
+      "id": "fetch-preview-source",
+      "name": "Fetch Preview Source",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Discover articles for preview (simplified)\nconst items = $input.all();\nconst articles = [];\n\nfor (const item of items) {\n  const sourceUrl = item.json.url || '';\n  const sourceName = item.json.source_name || '';\n  const genre = item.json.genre || '';\n  const maxPerSource = item.json.max_per_source || 3;\n  const metadata = {\n    source_id: item.json.source_id,\n    user_id: item.json.user_id,\n    summary_tone: item.json.summary_tone,\n    why_focus: item.json.why_focus\n  };\n  \n  let html = item.json.data || item.json.body || '';\n  if (typeof html !== 'string') continue;\n  if (html.length > 200000) html = html.substring(0, 200000);\n  \n  let baseUrl;\n  try { baseUrl = new URL(sourceUrl).origin; } catch (e) { continue; }\n  \n  const linkPattern = /href=[\"']([^\"']{10,200})[\"']/gi;\n  const found = [];\n  let match;\n  \n  while ((match = linkPattern.exec(html)) !== null && found.length < 30) {\n    let href = match[1];\n    if (href.startsWith('#') || href.startsWith('javascript:')) continue;\n    if (/\\.(css|js|png|jpg|gif|svg|ico|pdf)$/i.test(href)) continue;\n    if (/(\\/tag\\/|\\/category\\/|\\/author\\/|\\/search|\\/login)/i.test(href)) continue;\n    \n    if (href.startsWith('/')) href = baseUrl + href;\n    else if (!href.startsWith('http')) continue;\n    \n    try {\n      if (new URL(href).hostname.replace('www.','') !== new URL(baseUrl).hostname.replace('www.','')) continue;\n    } catch (e) { continue; }\n    \n    if (href.replace(/\\/$/, '') === baseUrl.replace(/\\/$/, '')) continue;\n    found.push(href);\n  }\n  \n  const unique = [...new Set(found)].slice(0, maxPerSource);\n  for (const url of unique) {\n    articles.push({ json: { article_url: url, source_name: sourceName, genre: genre, ...metadata } });\n  }\n}\n\nreturn articles.length > 0 ? articles.slice(0, 15) : [{ json: { error: true } }];"
+      },
+      "id": "discover-preview-links",
+      "name": "Discover Preview Links",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "id": "has-url", "leftValue": "={{ $json.article_url }}", "rightValue": "", "operator": { "type": "string", "operation": "isNotEmpty" } }],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-preview-links",
+      "name": "Filter Preview Links",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.article_url }}",
+        "options": { "response": { "response": { "fullResponse": false, "responseFormat": "text" } }, "timeout": 12000 }
+      },
+      "id": "fetch-preview-article",
+      "name": "Fetch Preview Article",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract preview article content\nconst items = $input.all();\nconst articles = [];\n\nfor (const item of items) {\n  const articleUrl = item.json.article_url || '';\n  const sourceName = item.json.source_name || '';\n  const genre = item.json.genre || '';\n  const metadata = { source_id: item.json.source_id, user_id: item.json.user_id, summary_tone: item.json.summary_tone, why_focus: item.json.why_focus };\n  \n  let html = item.json.data || item.json.body || '';\n  if (typeof html !== 'string' || html.length < 500) continue;\n  if (html.length > 150000) html = html.substring(0, 150000);\n  \n  let title = '';\n  const ogTitle = html.match(/property=[\"']og:title[\"'][^>]*content=[\"']([^\"']+)[\"']/i);\n  if (ogTitle) title = ogTitle[1];\n  if (!title) { const h1 = html.match(/<h1[^>]*>([^<]+)<\\/h1>/i); if (h1) title = h1[1].trim(); }\n  if (!title) { const tt = html.match(/<title[^>]*>([^<]+)<\\/title>/i); if (tt) title = tt[1].trim(); }\n  if (!title) continue;\n  \n  title = title.replace(/\\s*[|\\-–—]\\s*[^|\\-–—]*$/, '').trim();\n  \n  const paragraphs = [];\n  const pRegex = /<p[^>]*>([^<]{30,})<\\/p>/gi;\n  let pMatch;\n  while ((pMatch = pRegex.exec(html)) !== null && paragraphs.length < 10) {\n    const text = pMatch[1].replace(/<[^>]*>/g, '').trim();\n    if (text.length > 30) paragraphs.push(text);\n  }\n  const content = paragraphs.join(' ').substring(0, 2000);\n  if (content.length < 100) continue;\n  \n  articles.push({ json: { url: articleUrl, title: title.substring(0, 200), content, source_name: sourceName, genre, ...metadata } });\n}\n\nreturn articles.length > 0 ? articles.slice(0, 10) : [{ json: { no_articles: true } }];"
+      },
+      "id": "extract-preview-content",
+      "name": "Extract Preview Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1750, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "id": "has-title", "leftValue": "={{ $json.title }}", "rightValue": "", "operator": { "type": "string", "operation": "isNotEmpty" } }],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-preview-extracted",
+      "name": "Filter Preview Extracted",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 400]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            { "role": "system", "content": "You are a news editor. Given an article, write:\n1. A polished headline\n2. A 2-3 sentence summary\n3. A 1-2 sentence 'Why this matters'\n\nTone: {{ $json.summary_tone || 'Professional' }}\nFocus: {{ $json.why_focus || 'Business Focus' }}\n\nRespond in JSON: {\"headline\": \"...\", \"summary\": \"...\", \"why_matters\": \"...\"}" },
+            { "role": "user", "content": "Genre: {{ $json.genre }}\nTitle: {{ $json.title }}\nSource: {{ $json.source_name }}\n\nContent:\n{{ $json.content }}" }
+          ]
+        },
+        "options": { "temperature": 0.3, "responseFormat": "json_object" }
+      },
+      "id": "ai-preview",
+      "name": "AI Preview",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.7,
+      "position": [2250, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI and build preview response\nconst items = $input.all();\nconst genreColors = {\n  'Office Equipment & Technology': '#2563eb', 'Food & Drink': '#dc2626', 'Telecommunications & Internet': '#7c3aed',\n  'Healthcare': '#059669', 'Education': '#0891b2', 'Charity & Nonprofit': '#db2777', 'Fashion': '#c026d3',\n  'Retail': '#ea580c', 'Professional & Business Services': '#4f46e5', 'Property & Construction': '#ca8a04',\n  'Agencies': '#0d9488', 'Entertainment': '#e11d48', 'Transportation & Logistics': '#1d4ed8',\n  'Consumer Electronics': '#6366f1', 'Travel & Tourism': '#0284c7', 'Financial': '#15803d',\n  'Utilities & Energy': '#a16207', 'Leisure & Hospitality': '#be185d', 'Media & Publishing': '#9333ea',\n  'Government & Public Sector': '#1e40af', 'Cosmetics & Personal Care': '#ec4899', 'Home & Garden': '#65a30d',\n  'Automotive': '#b91c1c', 'Manufacturing & Industrial': '#64748b', 'Household Consumer Goods': '#f59e0b'\n};\n\nconst articles = items.map(item => {\n  const o = item.json;\n  let ai = {};\n  try { ai = JSON.parse(o.message?.content || o.text || '{}'); } catch(e) { ai = { headline: o.title, summary: o.content?.substring(0,150)+'...', why_matters: 'Industry news.' }; }\n  return {\n    url: o.url,\n    headline: ai.headline || o.title,\n    summary: ai.summary || 'Summary not available.',\n    why_matters: ai.why_matters || 'Industry relevance.',\n    source_name: o.source_name,\n    genre: o.genre,\n    genre_color: genreColors[o.genre] || '#003d96'\n  };\n});\n\nreturn [{ json: { success: true, articles, count: articles.length } }];"
+      },
+      "id": "build-preview-response",
+      "name": "Build Preview Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2500, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond-preview",
+      "name": "Respond Preview",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2750, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT us.*, (SELECT json_agg(json_build_object('headline', a.headline, 'summary', a.summary, 'why_matters', a.why_matters, 'url', a.url, 'source_name', a.source_name, 'genre', a.genre)) FROM articles a JOIN digests d ON a.digest_id = d.id WHERE d.user_id = us.user_id AND d.status = 'sent' ORDER BY d.sent_at DESC LIMIT 1) as recent_articles FROM user_settings us WHERE us.user_id = '{{ $json.body.user_id }}'",
+        "options": {}
+      },
+      "id": "get-test-email-data",
+      "name": "Get Test Email Data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [250, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build test email from recent digest\nconst data = $input.first().json;\nconst articles = data.recent_articles || [];\n\nconst genreColors = {\n  'Media & Publishing': '#9333ea', 'Agencies': '#0d9488', 'Financial': '#15803d',\n  'Travel & Tourism': '#0284c7', 'Fashion': '#c026d3', 'Healthcare': '#059669'\n};\n\nconst today = new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Europe/London' });\nconst greeting = data.email_greeting || 'Good morning!';\nconst footer = data.email_footer || 'Have a great day!';\n\nconst byGenre = {};\nfor (const a of articles) {\n  if (!byGenre[a.genre]) byGenre[a.genre] = [];\n  byGenre[a.genre].push(a);\n}\n\nlet html = `<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head><body style=\"font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f3feff; margin: 0; padding: 20px;\"><div style=\"max-width: 650px; margin: 0 auto;\">`;\nhtml += `<div style=\"background: linear-gradient(135deg, #003d96, #0056b3); color: white; padding: 35px; text-align: center; border-radius: 16px 16px 0 0;\"><h1 style=\"margin: 0;\">44 News Automation</h1><p style=\"margin: 12px 0 0; opacity: 0.9;\">TEST EMAIL — ${today}</p></div>`;\nhtml += `<div style=\"background: white; padding: 35px; border-radius: 0 0 16px 16px;\"><p style=\"color: #333;\">${greeting}</p>`;\n\nif (articles.length === 0) {\n  html += `<p style=\"text-align: center; color: #666; padding: 40px;\">No recent articles to show. Run a digest first to populate test data.</p>`;\n} else {\n  for (const genre of Object.keys(byGenre).sort()) {\n    const color = genreColors[genre] || '#003d96';\n    html += `<div style=\"margin: 20px 0 15px;\"><span style=\"background: ${color}; color: white; padding: 8px 16px; border-radius: 6px; font-weight: 600;\">${genre}</span></div>`;\n    for (const a of byGenre[genre]) {\n      html += `<div style=\"background: #f8fafc; padding: 20px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid ${color};\">`;\n      html += `<h3 style=\"margin: 0 0 8px;\"><a href=\"${a.url}\" style=\"color: #003d96; text-decoration: none;\">${a.headline}</a></h3>`;\n      html += `<p style=\"font-size: 12px; color: #888; margin: 0 0 10px;\">from ${a.source_name}</p>`;\n      html += `<p style=\"color: #444; margin: 0 0 12px;\">${a.summary}</p>`;\n      html += `<div style=\"background: #e0f2fe; padding: 12px; border-radius: 8px;\"><strong style=\"color: #0369a1;\">WHY THIS MATTERS</strong><p style=\"margin: 5px 0 0; color: #475569;\">${a.why_matters}</p></div></div>`;\n    }\n  }\n}\n\nhtml += `<hr style=\"border: none; border-top: 1px solid #eee; margin: 25px 0;\"><p style=\"color: #666;\">${footer}</p></div><p style=\"text-align: center; color: #999; font-size: 12px; margin-top: 15px;\">Powered by 44 News Automation</p></div></body></html>`;\n\nreturn [{ json: { emailHtml: html, emailSubject: `[TEST] 44 News Digest — ${today}`, recipient_email: data.recipient_email, article_count: articles.length } }];"
+      },
+      "id": "build-test-email",
+      "name": "Build Test Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 700]
+    },
+    {
+      "parameters": {
+        "fromEmail": "news@44automationltd.com",
+        "toEmail": "={{ $json.recipient_email }}",
+        "subject": "={{ $json.emailSubject }}",
+        "emailType": "html",
+        "message": "={{ $json.emailHtml }}",
+        "options": {}
+      },
+      "id": "send-test-email",
+      "name": "Send Test Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [750, 700]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, sent_to: $json.recipient_email, article_count: $('Build Test Email').first().json.article_count }) }}"
+      },
+      "id": "respond-test-email",
+      "name": "Respond Test Email",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1000, 700]
+    }
+  ],
+  "connections": {
+    "Run Digest Webhook": { "main": [[{ "node": "Get Active Sources", "type": "main", "index": 0 }]] },
+    "Get Active Sources": { "main": [[{ "node": "Create Digest", "type": "main", "index": 0 }]] },
+    "Create Digest": { "main": [[{ "node": "Prepare Sources", "type": "main", "index": 0 }]] },
+    "Prepare Sources": { "main": [[{ "node": "Fetch Source Page", "type": "main", "index": 0 }]] },
+    "Fetch Source Page": { "main": [[{ "node": "Discover Article Links", "type": "main", "index": 0 }]] },
+    "Discover Article Links": { "main": [[{ "node": "Filter Valid Links", "type": "main", "index": 0 }]] },
+    "Filter Valid Links": { "main": [[{ "node": "Fetch Article", "type": "main", "index": 0 }], []] },
+    "Fetch Article": { "main": [[{ "node": "Extract Article Content", "type": "main", "index": 0 }]] },
+    "Extract Article Content": { "main": [[{ "node": "Filter Extracted", "type": "main", "index": 0 }]] },
+    "Filter Extracted": { "main": [[{ "node": "AI Summarize", "type": "main", "index": 0 }], []] },
+    "AI Summarize": { "main": [[{ "node": "Parse AI Response", "type": "main", "index": 0 }]] },
+    "Parse AI Response": { "main": [[{ "node": "Build Email HTML", "type": "main", "index": 0 }]] },
+    "Build Email HTML": { "main": [[{ "node": "Send Email", "type": "main", "index": 0 }]] },
+    "Send Email": { "main": [[{ "node": "Update Digest Status", "type": "main", "index": 0 }]] },
+    "Update Digest Status": { "main": [[{ "node": "Respond Run Success", "type": "main", "index": 0 }]] },
+    "Preview Webhook": { "main": [[{ "node": "Get Preview Sources", "type": "main", "index": 0 }]] },
+    "Get Preview Sources": { "main": [[{ "node": "Prepare Preview Sources", "type": "main", "index": 0 }]] },
+    "Prepare Preview Sources": { "main": [[{ "node": "Fetch Preview Source", "type": "main", "index": 0 }]] },
+    "Fetch Preview Source": { "main": [[{ "node": "Discover Preview Links", "type": "main", "index": 0 }]] },
+    "Discover Preview Links": { "main": [[{ "node": "Filter Preview Links", "type": "main", "index": 0 }]] },
+    "Filter Preview Links": { "main": [[{ "node": "Fetch Preview Article", "type": "main", "index": 0 }], []] },
+    "Fetch Preview Article": { "main": [[{ "node": "Extract Preview Content", "type": "main", "index": 0 }]] },
+    "Extract Preview Content": { "main": [[{ "node": "Filter Preview Extracted", "type": "main", "index": 0 }]] },
+    "Filter Preview Extracted": { "main": [[{ "node": "AI Preview", "type": "main", "index": 0 }], []] },
+    "AI Preview": { "main": [[{ "node": "Build Preview Response", "type": "main", "index": 0 }]] },
+    "Build Preview Response": { "main": [[{ "node": "Respond Preview", "type": "main", "index": 0 }]] },
+    "Test Email Webhook": { "main": [[{ "node": "Get Test Email Data", "type": "main", "index": 0 }]] },
+    "Get Test Email Data": { "main": [[{ "node": "Build Test Email", "type": "main", "index": 0 }]] },
+    "Build Test Email": { "main": [[{ "node": "Send Test Email", "type": "main", "index": 0 }]] },
+    "Send Test Email": { "main": [[{ "node": "Respond Test Email", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Europe/London"
+  }
+}
