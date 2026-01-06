@@ -1,0 +1,573 @@
+{
+  "name": "44 News Automation V2 - Homepage Discovery",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Daily 07:00 UK",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "notes": "Triggers daily at 07:00 Europe/London timezone"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, name, slug, sheet_id, recipients, max_stories_per_day, max_stories_per_genre, timezone FROM clients WHERE is_active = true",
+        "options": {}
+      },
+      "id": "get-clients",
+      "name": "Get Active Clients",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [220, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-clients",
+      "name": "Loop Clients",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO runs (client_id, run_date, status, started_at) VALUES ('{{ $json.id }}', CURRENT_DATE, 'running', NOW()) ON CONFLICT (client_id, run_date, run_number) DO UPDATE SET status = 'running', started_at = NOW() RETURNING *",
+        "options": {}
+      },
+      "id": "create-run",
+      "name": "Create Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [660, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Loop Clients').item.json.sheet_id }}"
+        },
+        "range": "A:B",
+        "options": {
+          "headerRow": 1
+        }
+      },
+      "id": "read-sheet",
+      "name": "Read Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [880, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-cred",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const VALID_GENRES = [\n  'Office Equipment & Technology',\n  'Food & Drink',\n  'Telecommunications & Internet',\n  'Healthcare',\n  'Education',\n  'Tobacco & E-cigarettes',\n  'Charity & Nonprofit',\n  'Fashion',\n  'Retail',\n  'Professional & Business Services',\n  'Property & Construction',\n  'Agencies',\n  'Entertainment',\n  'Transportation & Logistics',\n  'Consumer Electronics',\n  'Travel & Tourism',\n  'Financial',\n  'Utilities & Energy',\n  'Leisure & Hospitality',\n  'Media & Publishing',\n  'Government & Public Sector',\n  'Cosmetics & Personal Care',\n  'Home & Garden',\n  'Automotive',\n  'Manufacturing & Industrial',\n  'Household Consumer Goods'\n];\n\nconst client = $('Loop Clients').first().json;\nconst run = $('Create Run').first().json;\nconst results = [];\nconst errors = [];\n\nfor (const item of $input.all()) {\n  const url = (item.json.URL || '').trim();\n  const genre = (item.json.Genre || '').trim();\n\n  if (!url) {\n    errors.push({ url: '', genre, reason: 'Missing URL', client_id: client.id, run_id: run.id });\n    continue;\n  }\n\n  if (!genre) {\n    errors.push({ url, genre: '', reason: 'Missing genre', client_id: client.id, run_id: run.id });\n    continue;\n  }\n\n  if (!VALID_GENRES.includes(genre)) {\n    errors.push({ url, genre, reason: `Invalid genre: ${genre}`, client_id: client.id, run_id: run.id });\n    continue;\n  }\n\n  let normalizedUrl = url;\n  try {\n    const parsed = new URL(url);\n    normalizedUrl = parsed.href;\n  } catch (e) {\n    errors.push({ url, genre, reason: 'Invalid URL format', client_id: client.id, run_id: run.id });\n    continue;\n  }\n\n  results.push({\n    json: {\n      homepage_url: normalizedUrl,\n      genre,\n      client_id: client.id,\n      run_id: run.id,\n      client_name: client.name,\n      max_stories_per_genre: client.max_stories_per_genre || 6,\n      max_stories_per_day: client.max_stories_per_day || 60\n    }\n  });\n}\n\n$workflow.setStaticData('validation_errors', errors);\n\nreturn results.slice(0, 200);"
+      },
+      "id": "validate-sheet",
+      "name": "Validate Genres",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-homepages",
+      "name": "Loop Homepages",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1320, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.homepage_url }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 5
+            }
+          }
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.9"
+            }
+          ]
+        }
+      },
+      "id": "fetch-homepage",
+      "name": "Fetch Homepage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 300],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const cheerio = require('cheerio');\n\nconst item = $input.first().json;\nconst html = item.data || item.body || '';\nconst homepageUrl = $('Loop Homepages').item.json.homepage_url;\nconst genre = $('Loop Homepages').item.json.genre;\nconst clientId = $('Loop Homepages').item.json.client_id;\nconst runId = $('Loop Homepages').item.json.run_id;\n\nif (!html || typeof html !== 'string' || html.length < 500) {\n  return [{\n    json: {\n      candidates: [],\n      homepage_url: homepageUrl,\n      genre,\n      client_id: clientId,\n      run_id: runId,\n      error: 'Empty or invalid HTML'\n    }\n  }];\n}\n\nconst $ = cheerio.load(html);\nconst baseUrl = new URL(homepageUrl);\nconst baseDomain = baseUrl.hostname.replace('www.', '');\n\nconst EXCLUDED_PATHS = [\n  '/tag/', '/tags/', '/author/', '/authors/', '/about/', '/about-us/',\n  '/login/', '/signin/', '/signup/', '/subscribe/', '/subscription/',\n  '/privacy/', '/privacy-policy/', '/terms/', '/terms-of-service/',\n  '/jobs/', '/careers/', '/contact/', '/sitemap/', '/search/',\n  '/category/', '/categories/', '/archive/', '/rss/', '/feed/',\n  '/account/', '/profile/', '/settings/', '/help/', '/faq/',\n  '/advertise/', '/advertising/', '/media-kit/', '/press/',\n  '/newsletter/', '/podcasts/', '/videos/', '/webinars/'\n];\n\nconst EXCLUDED_EXT = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.zip', '.mp3', '.mp4'];\n\nconst TRACKING_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid', 'msclkid', 'ref'];\n\nconst candidates = [];\nconst seenUrls = new Set();\n\n$('a[href]').each((i, el) => {\n  try {\n    let href = $(el).attr('href');\n    if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) return;\n\n    let fullUrl;\n    try {\n      fullUrl = new URL(href, homepageUrl);\n    } catch (e) {\n      return;\n    }\n\n    const linkDomain = fullUrl.hostname.replace('www.', '');\n    if (linkDomain !== baseDomain) return;\n\n    const path = fullUrl.pathname.toLowerCase();\n    for (const excl of EXCLUDED_PATHS) {\n      if (path.includes(excl)) return;\n    }\n    for (const ext of EXCLUDED_EXT) {\n      if (path.endsWith(ext)) return;\n    }\n\n    for (const param of TRACKING_PARAMS) {\n      fullUrl.searchParams.delete(param);\n    }\n\n    const cleanUrl = fullUrl.href;\n    if (seenUrls.has(cleanUrl)) return;\n    seenUrls.add(cleanUrl);\n\n    if (cleanUrl === homepageUrl || cleanUrl === homepageUrl + '/') return;\n\n    let articleScore = 0;\n    const datePattern = /\\/(20[0-9]{2})[\\/\\-](0[1-9]|1[0-2])[\\/\\-](0[1-9]|[12][0-9]|3[01])/;\n    if (datePattern.test(path)) articleScore += 3;\n\n    const pathParts = path.split('/').filter(p => p.length > 0);\n    if (pathParts.length >= 2) articleScore += 1;\n\n    const slug = pathParts[pathParts.length - 1] || '';\n    if (slug.length > 20) articleScore += 2;\n\n    if (path.includes('/news/') || path.includes('/article/') || path.includes('/story/') || path.includes('/post/') || path.includes('/blog/')) {\n      articleScore += 2;\n    }\n\n    const linkText = $(el).text().trim().substring(0, 200);\n\n    let nearbyTimestamp = null;\n    const timeEl = $(el).parent().find('time').first();\n    if (timeEl.length) {\n      nearbyTimestamp = timeEl.attr('datetime') || timeEl.text();\n    }\n\n    if (articleScore >= 2) {\n      candidates.push({\n        url: cleanUrl,\n        link_text: linkText,\n        article_score: articleScore,\n        nearby_timestamp: nearbyTimestamp\n      });\n    }\n  } catch (e) {}\n});\n\ncandidates.sort((a, b) => b.article_score - a.article_score);\n\nreturn [{\n  json: {\n    candidates: candidates.slice(0, 100),\n    homepage_url: homepageUrl,\n    genre,\n    client_id: clientId,\n    run_id: runId,\n    candidates_found: candidates.length\n  }\n}];"
+      },
+      "id": "extract-links",
+      "name": "Extract Links",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst candidates = input.candidates || [];\n\nif (candidates.length === 0) {\n  return [{\n    json: {\n      ...input,\n      coverage_warning: `No candidates from ${input.homepage_url}`,\n      flattened_candidates: []\n    }\n  }];\n}\n\nconst results = candidates.map(c => ({\n  json: {\n    article_url: c.url,\n    article_score: c.article_score,\n    nearby_timestamp: c.nearby_timestamp,\n    link_text: c.link_text,\n    homepage_url: input.homepage_url,\n    genre: input.genre,\n    client_id: input.client_id,\n    run_id: input.run_id\n  }\n}));\n\nreturn results;"
+      },
+      "id": "flatten-candidates",
+      "name": "Flatten Candidates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allCandidates = [];\nconst items = $input.all();\n\nfor (const item of items) {\n  if (item.json.article_url) {\n    allCandidates.push(item);\n  }\n}\n\nconst seenUrls = new Set();\nconst unique = [];\n\nfor (const item of allCandidates) {\n  if (!seenUrls.has(item.json.article_url)) {\n    seenUrls.add(item.json.article_url);\n    unique.push(item);\n  }\n}\n\nreturn unique;"
+      },
+      "id": "aggregate-candidates",
+      "name": "Aggregate Candidates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "batch-articles",
+      "name": "Batch (5)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2420, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.article_url }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 5
+            }
+          }
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+          ]
+        }
+      },
+      "id": "fetch-article",
+      "name": "Fetch Article",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 300],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const cheerio = require('cheerio');\nconst crypto = require('crypto');\n\nconst item = $input.first();\nconst html = item.json.data || item.json.body || '';\nconst articleUrl = $('Batch (5)').item.json.article_url;\nconst genre = $('Batch (5)').item.json.genre;\nconst clientId = $('Batch (5)').item.json.client_id;\nconst runId = $('Batch (5)').item.json.run_id;\n\nif (!html || typeof html !== 'string' || html.length < 500) {\n  return [{\n    json: {\n      skip: true,\n      skip_reason: 'Empty or short response',\n      url: articleUrl,\n      genre,\n      client_id: clientId,\n      run_id: runId\n    }\n  }];\n}\n\nconst $ = cheerio.load(html);\n\nlet canonicalUrl = $('link[rel=\"canonical\"]').attr('href') || $('meta[property=\"og:url\"]').attr('content') || articleUrl;\nif (canonicalUrl && !canonicalUrl.startsWith('http')) {\n  try {\n    canonicalUrl = new URL(canonicalUrl, articleUrl).href;\n  } catch (e) {\n    canonicalUrl = articleUrl;\n  }\n}\n\nconst sourceName = $('meta[property=\"og:site_name\"]').attr('content') || $('meta[name=\"application-name\"]').attr('content') || new URL(canonicalUrl).hostname.replace('www.', '');\n\nconst title = $('meta[property=\"og:title\"]').attr('content') || $('meta[name=\"title\"]').attr('content') || $('title').text().trim().split('|')[0].trim() || $('h1').first().text().trim();\n\nconst paywallSel = ['.paywall', '.subscription-required', '[data-paywall]', '.premium-content', '.subscriber-only', '.locked-content'];\nlet isPaywalled = false;\nfor (const sel of paywallSel) {\n  if ($(sel).length > 0) {\n    isPaywalled = true;\n    break;\n  }\n}\n\nlet publishDate = null;\nlet publishDateSource = null;\nlet confidence = 0;\n\n$('script[type=\"application/ld+json\"]').each((i, el) => {\n  if (publishDate) return;\n  try {\n    const data = JSON.parse($(el).html());\n    const items = Array.isArray(data) ? data : [data];\n    for (const itm of items) {\n      if (['NewsArticle', 'Article', 'BlogPosting', 'WebPage'].includes(itm['@type'])) {\n        if (itm.datePublished) {\n          publishDate = itm.datePublished;\n          publishDateSource = 'jsonld_published';\n          confidence = 0.95;\n          break;\n        }\n        if (itm.dateModified) {\n          publishDate = itm.dateModified;\n          publishDateSource = 'jsonld_modified';\n          confidence = 0.85;\n          break;\n        }\n      }\n    }\n  } catch (e) {}\n});\n\nif (!publishDate) {\n  const ogDate = $('meta[property=\"article:published_time\"]').attr('content');\n  if (ogDate) {\n    publishDate = ogDate;\n    publishDateSource = 'opengraph';\n    confidence = 0.90;\n  }\n}\n\nif (!publishDate) {\n  const metaSel = ['meta[name=\"pubdate\"]', 'meta[name=\"date\"]', 'meta[name=\"DC.date\"]', 'meta[name=\"DC.date.issued\"]', 'meta[itemprop=\"datePublished\"]', 'meta[name=\"article:published\"]'];\n  for (const sel of metaSel) {\n    const val = $(sel).attr('content');\n    if (val) {\n      publishDate = val;\n      publishDateSource = 'meta';\n      confidence = 0.80;\n      break;\n    }\n  }\n}\n\nif (!publishDate) {\n  const timeEl = $('time[datetime]').first();\n  if (timeEl.length) {\n    publishDate = timeEl.attr('datetime');\n    publishDateSource = 'time_element';\n    confidence = 0.70;\n  }\n}\n\nif (!publishDate) {\n  const urlMatch = canonicalUrl.match(/\\/(20[0-9]{2})\\/(0[1-9]|1[0-2])\\/(0[1-9]|[12][0-9]|3[01])/);\n  if (urlMatch) {\n    publishDate = `${urlMatch[1]}-${urlMatch[2]}-${urlMatch[3]}`;\n    publishDateSource = 'url_pattern';\n    confidence = 0.50;\n  }\n}\n\n$('script, style, nav, header, footer, aside, .ad, .advertisement, .social-share, .related-articles, .comments, .sidebar, noscript').remove();\n\nlet articleBody = '';\nconst contentSel = ['article', '[itemprop=\"articleBody\"]', '.article-body', '.article-content', '.post-content', '.entry-content', '.story-body', 'main', '.content'];\nfor (const sel of contentSel) {\n  const content = $(sel).first();\n  if (content.length && content.text().trim().length > 300) {\n    articleBody = content.text().trim();\n    break;\n  }\n}\n\nif (!articleBody || articleBody.length < 300) {\n  const paragraphs = [];\n  $('p').each((i, el) => {\n    const text = $(el).text().trim();\n    if (text.length > 40) paragraphs.push(text);\n  });\n  articleBody = paragraphs.join('\\n\\n');\n}\n\nif (articleBody.length < 300) isPaywalled = true;\n\nconst dedupeKey = crypto.createHash('sha256').update(canonicalUrl).digest('hex').substring(0, 64);\nconst titleNormalized = title ? title.toLowerCase().replace(/[^a-z0-9\\s]/g, '').replace(/\\s+/g, ' ').trim() : '';\nconst contentFingerprint = crypto.createHash('sha256').update(articleBody.substring(0, 1000)).digest('hex').substring(0, 64);\n\nreturn [{\n  json: {\n    url: articleUrl,\n    canonical_url: canonicalUrl,\n    genre,\n    client_id: clientId,\n    run_id: runId,\n    source_name: sourceName,\n    original_title: title,\n    article_body: articleBody,\n    word_count: articleBody.split(/\\s+/).length,\n    publish_date: publishDate,\n    publish_date_source: publishDateSource,\n    publish_date_confidence: confidence,\n    is_paywalled: isPaywalled,\n    dedupe_key: dedupeKey,\n    title_normalized: titleNormalized,\n    content_fingerprint: contentFingerprint,\n    skip: false\n  }\n}];"
+      },
+      "id": "extract-content",
+      "name": "Extract Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2860, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nif (item.skip) return [{ json: item }];\n\nif (item.is_paywalled) {\n  return [{ json: { ...item, skip: true, skip_reason: 'Paywalled or blocked' } }];\n}\n\nif (!item.publish_date) {\n  return [{ json: { ...item, skip: true, skip_reason: 'Unknown publish date - MANDATORY SKIP' } }];\n}\n\nlet pubDate;\ntry {\n  pubDate = new Date(item.publish_date);\n  if (isNaN(pubDate.getTime())) throw new Error('Invalid');\n} catch (e) {\n  return [{ json: { ...item, skip: true, skip_reason: `Invalid date: ${item.publish_date}` } }];\n}\n\nconst now = new Date();\nconst ukTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/London' }));\nconst ukHour = ukTime.getHours();\n\nlet windowEnd = new Date(ukTime);\nwindowEnd.setHours(7, 0, 0, 0);\nif (ukHour < 7) windowEnd.setDate(windowEnd.getDate() - 1);\n\nconst windowStart = new Date(windowEnd);\nwindowStart.setDate(windowStart.getDate() - 1);\n\nconst pubTime = pubDate.getTime();\nif (pubTime < windowStart.getTime() || pubTime > windowEnd.getTime()) {\n  return [{ json: { ...item, skip: true, skip_reason: `Outside 24h window: ${pubDate.toISOString()}` } }];\n}\n\nreturn [{ json: { ...item, published_at: pubDate.toISOString() } }];"
+      },
+      "id": "validate-date",
+      "name": "Validate Date",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3080, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "skip-check",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-skipped",
+      "name": "Filter Skip",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3300, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO errors (client_id, run_id, url, genre, stage, error_type, error_message) VALUES ('{{ $json.client_id }}', '{{ $json.run_id }}', '{{ $json.url }}', '{{ $json.genre }}', 'article_validation', 'skipped', '{{ $json.skip_reason }}')",
+        "options": {}
+      },
+      "id": "log-skipped",
+      "name": "Log Skipped",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3520, 500],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().filter(i => !i.json.skip);\nconst seen = new Map();\nconst results = [];\n\nitems.sort((a, b) => (b.json.publish_date_confidence || 0) - (a.json.publish_date_confidence || 0));\n\nfor (const item of items) {\n  const key = item.json.dedupe_key;\n  const titleNorm = item.json.title_normalized;\n  const contentFp = item.json.content_fingerprint;\n\n  if (seen.has(key)) continue;\n\n  let isDupe = false;\n  for (const [k, ex] of seen.entries()) {\n    if (ex.title_normalized === titleNorm && titleNorm.length > 20) {\n      isDupe = true;\n      break;\n    }\n    if (ex.content_fingerprint === contentFp && contentFp) {\n      isDupe = true;\n      break;\n    }\n  }\n\n  if (!isDupe) {\n    seen.set(key, item.json);\n    results.push(item);\n  }\n}\n\nreturn results;"
+      },
+      "id": "deduplicate",
+      "name": "Deduplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3520, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a professional news editor for '44 News Automation', a marketing agency newsletter.\n\nTask:\n1. Polish the article title - faithful, factual, no sensationalism\n2. Write summary (3-6 sentences) - factual, professional, concise\n3. Write 'Why this matters' (max 3 sentences) - formal, agency-focused, include 1 practical marketing implication, never invent facts, flag uncertainty if needed\n4. Score agency relevance (1-5)\n\nRules:\n- Never add facts not in the article\n- Never invent or assume information\n- Keep language professional\n- Signal uncertainty briefly if needed\n\nRespond in JSON:\n{\n  \"polished_title\": \"...\",\n  \"summary\": \"...\",\n  \"why_matters\": \"...\",\n  \"agency_relevance_score\": 1-5\n}"
+            },
+            {
+              "role": "user",
+              "content": "Genre: {{ $json.genre }}\n\nOriginal Title: {{ $json.original_title }}\n\nSource: {{ $json.source_name }}\n\nArticle:\n{{ $json.article_body.substring(0, 4000) }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "responseFormat": "json_object"
+        }
+      },
+      "id": "llm-process",
+      "name": "LLM Process",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.7,
+      "position": [3740, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-cred",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nlet llmData;\ntry {\n  const content = item.message?.content || item.text || item.output || '{}';\n  llmData = JSON.parse(content);\n} catch (e) {\n  llmData = {\n    polished_title: item.original_title,\n    summary: 'Summary unavailable.',\n    why_matters: 'Analysis unavailable.',\n    agency_relevance_score: 3\n  };\n}\n\nreturn [{\n  json: {\n    ...item,\n    polished_title: llmData.polished_title || item.original_title,\n    summary: llmData.summary || 'Summary unavailable.',\n    why_matters: llmData.why_matters || 'Analysis unavailable.',\n    agency_relevance_score: parseInt(llmData.agency_relevance_score) || 3\n  }\n}];"
+      },
+      "id": "parse-llm",
+      "name": "Parse LLM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3960, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst MAX_PER_GENRE = 6;\nconst MAX_TOTAL = 60;\n\nconst byGenre = {};\nfor (const item of items) {\n  const genre = item.json.genre;\n  if (!byGenre[genre]) byGenre[genre] = [];\n  byGenre[genre].push(item);\n}\n\nfor (const genre in byGenre) {\n  byGenre[genre].sort((a, b) => {\n    const scoreA = a.json.agency_relevance_score || 0;\n    const scoreB = b.json.agency_relevance_score || 0;\n    if (scoreB !== scoreA) return scoreB - scoreA;\n    return new Date(b.json.published_at || 0) - new Date(a.json.published_at || 0);\n  });\n}\n\nconst results = [];\nlet overallRank = 0;\n\nfor (const genre in byGenre) {\n  const stories = byGenre[genre].slice(0, MAX_PER_GENRE);\n  stories.forEach((item, idx) => {\n    overallRank++;\n    if (overallRank <= MAX_TOTAL) {\n      results.push({\n        json: {\n          ...item.json,\n          genre_rank: idx + 1,\n          overall_rank: overallRank,\n          is_top_signal: false\n        }\n      });\n    }\n  });\n}\n\nresults.sort((a, b) => {\n  const scoreA = a.json.agency_relevance_score || 0;\n  const scoreB = b.json.agency_relevance_score || 0;\n  if (scoreB !== scoreA) return scoreB - scoreA;\n  return new Date(b.json.published_at) - new Date(a.json.published_at);\n});\n\nresults.slice(0, 5).forEach(item => { item.json.is_top_signal = true; });\n\nresults.sort((a, b) => {\n  if (a.json.genre < b.json.genre) return -1;\n  if (a.json.genre > b.json.genre) return 1;\n  return a.json.genre_rank - b.json.genre_rank;\n});\n\nreturn results;"
+      },
+      "id": "rank-cap",
+      "name": "Rank & Cap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4180, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO stories (\n  client_id, run_id, original_url, canonical_url, genre, source_name,\n  original_title, polished_title, summary, why_matters, article_body,\n  published_at, publish_date_source, publish_date_confidence,\n  agency_relevance_score, dedupe_key, title_normalized, content_fingerprint,\n  word_count, genre_rank, overall_rank, is_top_signal\n) VALUES (\n  '{{ $json.client_id }}',\n  '{{ $json.run_id }}',\n  '{{ $json.url.replace(/'/g, \"''\") }}',\n  '{{ $json.canonical_url.replace(/'/g, \"''\") }}',\n  '{{ $json.genre }}',\n  '{{ ($json.source_name || \"\").replace(/'/g, \"''\") }}',\n  '{{ ($json.original_title || \"\").replace(/'/g, \"''\").substring(0, 500) }}',\n  '{{ ($json.polished_title || \"\").replace(/'/g, \"''\").substring(0, 500) }}',\n  '{{ ($json.summary || \"\").replace(/'/g, \"''\") }}',\n  '{{ ($json.why_matters || \"\").replace(/'/g, \"''\") }}',\n  '{{ ($json.article_body || \"\").replace(/'/g, \"''\").substring(0, 10000) }}',\n  '{{ $json.published_at }}',\n  '{{ $json.publish_date_source }}',\n  {{ $json.publish_date_confidence || 0 }},\n  {{ $json.agency_relevance_score || 3 }},\n  '{{ $json.dedupe_key }}',\n  '{{ ($json.title_normalized || \"\").replace(/'/g, \"''\").substring(0, 500) }}',\n  '{{ $json.content_fingerprint }}',\n  {{ $json.word_count || 0 }},\n  {{ $json.genre_rank || 0 }},\n  {{ $json.overall_rank || 0 }},\n  {{ $json.is_top_signal || false }}\n)\nON CONFLICT (client_id, run_id, dedupe_key) DO UPDATE SET\n  polished_title = EXCLUDED.polished_title,\n  summary = EXCLUDED.summary,\n  why_matters = EXCLUDED.why_matters,\n  agency_relevance_score = EXCLUDED.agency_relevance_score,\n  genre_rank = EXCLUDED.genre_rank,\n  overall_rank = EXCLUDED.overall_rank,\n  is_top_signal = EXCLUDED.is_top_signal,\n  updated_at = NOW()",
+        "options": {}
+      },
+      "id": "store-story",
+      "name": "Store Story",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [4400, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const allStories = $input.all().map(i => i.json);\nconst client = $('Loop Clients').first().json;\nconst run = $('Create Run').first().json;\n\nconst GENRE_COLORS = {\n  'Office Equipment & Technology': '#2563eb',\n  'Food & Drink': '#dc2626',\n  'Telecommunications & Internet': '#7c3aed',\n  'Healthcare': '#059669',\n  'Education': '#0891b2',\n  'Tobacco & E-cigarettes': '#57534e',\n  'Charity & Nonprofit': '#db2777',\n  'Fashion': '#c026d3',\n  'Retail': '#ea580c',\n  'Professional & Business Services': '#4f46e5',\n  'Property & Construction': '#ca8a04',\n  'Agencies': '#0d9488',\n  'Entertainment': '#e11d48',\n  'Transportation & Logistics': '#1d4ed8',\n  'Consumer Electronics': '#6366f1',\n  'Travel & Tourism': '#0284c7',\n  'Financial': '#15803d',\n  'Utilities & Energy': '#a16207',\n  'Leisure & Hospitality': '#be185d',\n  'Media & Publishing': '#9333ea',\n  'Government & Public Sector': '#1e40af',\n  'Cosmetics & Personal Care': '#ec4899',\n  'Home & Garden': '#65a30d',\n  'Automotive': '#b91c1c',\n  'Manufacturing & Industrial': '#475569',\n  'Household Consumer Goods': '#d97706'\n};\n\nconst topSignals = allStories.filter(s => s.is_top_signal).slice(0, 5);\n\nconst byGenre = {};\nfor (const story of allStories) {\n  if (!byGenre[story.genre]) byGenre[story.genre] = [];\n  byGenre[story.genre].push(story);\n}\n\nconst today = new Date();\nconst dateStr = today.toLocaleDateString('en-GB', {\n  weekday: 'long',\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric',\n  timeZone: 'Europe/London'\n});\n\nreturn [{\n  json: {\n    client,\n    run,\n    dateStr,\n    storyCount: allStories.length,\n    topSignals,\n    storiesByGenre: byGenre,\n    genreColors: GENRE_COLORS,\n    recipients: client.recipients || []\n  }\n}];"
+      },
+      "id": "aggregate-email",
+      "name": "Aggregate Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4620, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst { dateStr, storyCount, topSignals, storiesByGenre, genreColors, client } = data;\n\nconst noNewsVariants = [\n  \"Today's scan found no stories meeting our quality criteria within the 24-hour window. We'll be back tomorrow with fresh insights.\",\n  \"Our filters didn't surface any qualifying stories today. Sometimes quiet news days happen—we'll return tomorrow with the latest.\",\n  \"No stories passed our quality threshold today. Rest assured, we're monitoring continuously and will deliver tomorrow's brief as usual.\",\n  \"Today's news cycle didn't yield stories meeting our standards. We maintain strict criteria to ensure you only receive relevant, high-quality content.\",\n  \"A rare quiet day in our monitored sources. Our automated checks continue around the clock—expect your next brief tomorrow at 07:00.\",\n  \"No qualifying content today. Our multi-tier validation ensures quality over quantity. Tomorrow's brief will arrive on schedule.\",\n  \"Today's sources didn't produce content meeting our publication criteria. Quality assurance remains our priority—see you tomorrow.\"\n];\n\nconst dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24));\nconst variant = noNewsVariants[dayOfYear % noNewsVariants.length];\n\nlet html = `<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>44 News Automation - Morning Brief</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.6; color: #003d96; background-color: #f3feff; margin: 0; padding: 0; }\n    .container { max-width: 680px; margin: 0 auto; padding: 20px; }\n    .header { text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #003d96 0%, #0056b3 100%); color: white; border-radius: 12px 12px 0 0; }\n    .header h1 { margin: 0 0 10px 0; font-size: 28px; font-weight: 700; }\n    .header .date { font-size: 16px; opacity: 0.9; }\n    .content { background: white; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }\n    .top-signals { background: #f8fafc; border-left: 4px solid #003d96; padding: 20px; margin-bottom: 30px; border-radius: 0 8px 8px 0; }\n    .top-signals h2 { margin: 0 0 15px 0; font-size: 18px; color: #003d96; }\n    .top-signals ul { margin: 0; padding-left: 20px; }\n    .top-signals li { margin-bottom: 8px; }\n    .top-signals a { color: #003d96; text-decoration: none; }\n    .top-signals a:hover { text-decoration: underline; }\n    .genre-section { margin-bottom: 30px; }\n    .genre-header { color: white; padding: 12px 20px; border-radius: 8px; margin-bottom: 15px; font-size: 16px; font-weight: 600; }\n    .story-card { background: #f8fafc; border-radius: 8px; padding: 20px; margin-bottom: 15px; border-left: 4px solid #e2e8f0; }\n    .story-card h3 { margin: 0 0 10px 0; font-size: 17px; }\n    .story-card h3 a { color: #003d96; text-decoration: none; }\n    .story-card h3 a:hover { text-decoration: underline; }\n    .story-card .source { font-size: 12px; color: #64748b; margin-bottom: 10px; }\n    .story-card .summary { font-size: 14px; color: #334155; margin-bottom: 12px; }\n    .story-card .why-matters { font-size: 13px; color: #475569; background: #e0f2fe; padding: 12px; border-radius: 6px; border-left: 3px solid #0284c7; }\n    .story-card .why-matters strong { color: #0369a1; }\n    .footer { text-align: center; padding: 20px; color: #64748b; font-size: 12px; }\n    .no-news { text-align: center; padding: 40px 20px; color: #64748b; }\n    @media (max-width: 600px) { .container { padding: 10px; } .header { padding: 20px 15px; } .header h1 { font-size: 22px; } .content { padding: 20px 15px; } }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>44 News Automation</h1>\n      <div class=\"date\">Morning Brief — ${dateStr}</div>\n    </div>\n    <div class=\"content\">\\n`;\n\nif (storyCount === 0) {\n  html += `      <div class=\"no-news\"><p>${variant}</p></div>\\n`;\n} else {\n  if (topSignals.length > 0) {\n    html += `      <div class=\"top-signals\"><h2>Top Signals</h2><ul>\\n`;\n    for (const signal of topSignals) {\n      html += `          <li><a href=\"${signal.canonical_url}\">${signal.polished_title}</a></li>\\n`;\n    }\n    html += `      </ul></div>\\n`;\n  }\n\n  const genres = Object.keys(storiesByGenre).sort();\n  for (const genre of genres) {\n    const stories = storiesByGenre[genre];\n    const color = genreColors[genre] || '#003d96';\n    html += `      <div class=\"genre-section\"><div class=\"genre-header\" style=\"background-color: ${color};\">${genre}</div>\\n`;\n    for (const story of stories) {\n      html += `        <div class=\"story-card\">\n          <h3><a href=\"${story.canonical_url}\">${story.polished_title}</a></h3>\n          <div class=\"source\">${story.source_name || 'Unknown'}</div>\n          <div class=\"summary\">${story.summary}</div>\n          <div class=\"why-matters\"><strong>Why this matters:</strong> ${story.why_matters}</div>\n        </div>\\n`;\n    }\n    html += `      </div>\\n`;\n  }\n}\n\nhtml += `    </div>\n    <div class=\"footer\">\n      <p>Automated by 44 News Automation</p>\n      <p>This email was generated automatically. Please do not reply.</p>\n    </div>\n  </div>\n</body>\n</html>`;\n\nreturn [{\n  json: {\n    ...data,\n    emailHtml: html,\n    emailSubject: `44 News Automation — Morning Brief — ${dateStr}`,\n    isNoNews: storyCount === 0,\n    noNewsVariant: storyCount === 0 ? (dayOfYear % 7) + 1 : null\n  }\n}];"
+      },
+      "id": "generate-email",
+      "name": "Generate Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4840, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $json.recipients.join(', ') }}",
+        "subject": "={{ $json.emailSubject }}",
+        "emailType": "html",
+        "message": "={{ $json.emailHtml }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [5060, 300],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-cred",
+          "name": "IONOS SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO email_logs (client_id, run_id, subject, recipients, story_count, top_signals, genres_included, status, sent_at, is_no_news_email, no_news_variant) VALUES ('{{ $json.client.id }}', '{{ $json.run.id }}', '{{ $json.emailSubject.replace(/'/g, \"''\") }}', '{{ JSON.stringify($json.recipients) }}'::jsonb, {{ $json.storyCount }}, '{{ JSON.stringify($json.topSignals.map(s => s.polished_title)) }}'::jsonb, '{{ JSON.stringify(Object.keys($json.storiesByGenre)) }}'::jsonb, 'sent', NOW(), {{ $json.isNoNews }}, {{ $json.noNewsVariant || 'NULL' }})",
+        "options": {}
+      },
+      "id": "log-email",
+      "name": "Log Email",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [5280, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE runs SET status = 'completed', completed_at = NOW(), stories_created = (SELECT COUNT(*) FROM stories WHERE run_id = '{{ $json.run.id }}'), error_count = (SELECT COUNT(*) FROM errors WHERE run_id = '{{ $json.run.id }}'), email_sent = true, email_sent_at = NOW() WHERE id = '{{ $json.run.id }}'",
+        "options": {}
+      },
+      "id": "complete-run",
+      "name": "Complete Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [5500, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $env.ADMIN_ALERT_EMAIL }}",
+        "subject": "[ALERT] 44 News Automation - Run Failed",
+        "emailType": "text",
+        "message": "The daily news automation run failed.\n\nClient: {{ $json.client?.name || 'Unknown' }}\nRun ID: {{ $json.run?.id || 'Unknown' }}\nError: {{ $json.error?.message || 'Unknown error' }}\n\nPlease check the n8n logs for more details.",
+        "options": {}
+      },
+      "id": "admin-alert",
+      "name": "Admin Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [5280, 500],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-cred",
+          "name": "IONOS SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 07:00 UK": {
+      "main": [[{ "node": "Get Active Clients", "type": "main", "index": 0 }]]
+    },
+    "Get Active Clients": {
+      "main": [[{ "node": "Loop Clients", "type": "main", "index": 0 }]]
+    },
+    "Loop Clients": {
+      "main": [
+        [{ "node": "Create Run", "type": "main", "index": 0 }],
+        [{ "node": "Complete Run", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Run": {
+      "main": [[{ "node": "Read Sheet", "type": "main", "index": 0 }]]
+    },
+    "Read Sheet": {
+      "main": [[{ "node": "Validate Genres", "type": "main", "index": 0 }]]
+    },
+    "Validate Genres": {
+      "main": [[{ "node": "Loop Homepages", "type": "main", "index": 0 }]]
+    },
+    "Loop Homepages": {
+      "main": [
+        [{ "node": "Fetch Homepage", "type": "main", "index": 0 }],
+        [{ "node": "Aggregate Candidates", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Homepage": {
+      "main": [
+        [{ "node": "Extract Links", "type": "main", "index": 0 }],
+        [{ "node": "Loop Homepages", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Links": {
+      "main": [[{ "node": "Flatten Candidates", "type": "main", "index": 0 }]]
+    },
+    "Flatten Candidates": {
+      "main": [[{ "node": "Loop Homepages", "type": "main", "index": 0 }]]
+    },
+    "Aggregate Candidates": {
+      "main": [[{ "node": "Batch (5)", "type": "main", "index": 0 }]]
+    },
+    "Batch (5)": {
+      "main": [
+        [{ "node": "Fetch Article", "type": "main", "index": 0 }],
+        [{ "node": "Rank & Cap", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Article": {
+      "main": [
+        [{ "node": "Extract Content", "type": "main", "index": 0 }],
+        [{ "node": "Log Skipped", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Content": {
+      "main": [[{ "node": "Validate Date", "type": "main", "index": 0 }]]
+    },
+    "Validate Date": {
+      "main": [[{ "node": "Filter Skip", "type": "main", "index": 0 }]]
+    },
+    "Filter Skip": {
+      "main": [
+        [{ "node": "Deduplicate", "type": "main", "index": 0 }],
+        [{ "node": "Log Skipped", "type": "main", "index": 0 }]
+      ]
+    },
+    "Deduplicate": {
+      "main": [[{ "node": "LLM Process", "type": "main", "index": 0 }]]
+    },
+    "LLM Process": {
+      "main": [[{ "node": "Parse LLM", "type": "main", "index": 0 }]]
+    },
+    "Parse LLM": {
+      "main": [[{ "node": "Batch (5)", "type": "main", "index": 0 }]]
+    },
+    "Rank & Cap": {
+      "main": [[{ "node": "Store Story", "type": "main", "index": 0 }]]
+    },
+    "Store Story": {
+      "main": [[{ "node": "Aggregate Email", "type": "main", "index": 0 }]]
+    },
+    "Aggregate Email": {
+      "main": [[{ "node": "Generate Email", "type": "main", "index": 0 }]]
+    },
+    "Generate Email": {
+      "main": [[{ "node": "Send Email", "type": "main", "index": 0 }]]
+    },
+    "Send Email": {
+      "main": [[{ "node": "Log Email", "type": "main", "index": 0 }]]
+    },
+    "Log Email": {
+      "main": [[{ "node": "Loop Clients", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Europe/London",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "44-news-automation" },
+    { "name": "production" },
+    { "name": "homepage-discovery" }
+  ],
+  "triggerCount": 1
+}

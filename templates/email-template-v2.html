@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="x-apple-disable-message-reformatting">
+  <meta name="format-detection" content="telephone=no,address=no,email=no,date=no,url=no">
+  <title>44 News Automation - Morning Brief</title>
+
+  <!--[if mso]>
+  <noscript>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:AllowPNG/>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+  </noscript>
+  <![endif]-->
+
+  <style type="text/css">
+    /* RESET STYLES */
+    html, body {
+      margin: 0 !important;
+      padding: 0 !important;
+      height: 100% !important;
+      width: 100% !important;
+    }
+
+    * {
+      -ms-text-size-adjust: 100%;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    div[style*="margin: 16px 0"] {
+      margin: 0 !important;
+    }
+
+    table, td {
+      mso-table-lspace: 0pt !important;
+      mso-table-rspace: 0pt !important;
+    }
+
+    table {
+      border-spacing: 0 !important;
+      border-collapse: collapse !important;
+      table-layout: fixed !important;
+      margin: 0 auto !important;
+    }
+
+    img {
+      -ms-interpolation-mode: bicubic;
+      border: 0;
+      height: auto;
+      line-height: 100%;
+      outline: none;
+      text-decoration: none;
+    }
+
+    a {
+      text-decoration: none;
+    }
+
+    /* BASE STYLES */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.6;
+      color: #003d96;
+      background-color: #f3feff;
+    }
+
+    /* WRAPPER */
+    .email-wrapper {
+      width: 100%;
+      background-color: #f3feff;
+      padding: 20px 0;
+    }
+
+    /* MAIN CONTAINER */
+    .email-container {
+      max-width: 680px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    /* HEADER */
+    .email-header {
+      background: linear-gradient(135deg, #003d96 0%, #0056b3 100%);
+      padding: 30px 20px;
+      text-align: center;
+    }
+
+    .email-header h1 {
+      margin: 0 0 10px 0;
+      font-size: 28px;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.2;
+    }
+
+    .email-header .date {
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.9);
+      margin: 0;
+    }
+
+    /* CONTENT */
+    .email-content {
+      padding: 30px;
+    }
+
+    /* TOP SIGNALS */
+    .top-signals {
+      background-color: #f8fafc;
+      border-left: 4px solid #003d96;
+      padding: 20px;
+      margin-bottom: 30px;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .top-signals h2 {
+      margin: 0 0 15px 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: #003d96;
+    }
+
+    .top-signals ul {
+      margin: 0;
+      padding-left: 20px;
+      list-style-type: disc;
+    }
+
+    .top-signals li {
+      margin-bottom: 8px;
+      color: #334155;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .top-signals a {
+      color: #003d96;
+      text-decoration: none;
+    }
+
+    .top-signals a:hover {
+      text-decoration: underline;
+    }
+
+    /* GENRE SECTION */
+    .genre-section {
+      margin-bottom: 30px;
+    }
+
+    .genre-header {
+      color: #ffffff;
+      padding: 12px 20px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      font-size: 16px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    /* STORY CARD */
+    .story-card {
+      background-color: #f8fafc;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 15px;
+      border-left: 4px solid #e2e8f0;
+    }
+
+    .story-card h3 {
+      margin: 0 0 8px 0;
+      font-size: 17px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    .story-card h3 a {
+      color: #003d96;
+      text-decoration: none;
+    }
+
+    .story-card h3 a:hover {
+      text-decoration: underline;
+    }
+
+    .story-card .source {
+      font-size: 12px;
+      color: #64748b;
+      margin: 0 0 12px 0;
+    }
+
+    .story-card .summary {
+      font-size: 14px;
+      color: #334155;
+      margin: 0 0 15px 0;
+      line-height: 1.6;
+    }
+
+    .story-card .why-matters {
+      background-color: #e0f2fe;
+      border-left: 3px solid #0284c7;
+      border-radius: 0 6px 6px 0;
+      padding: 12px 15px;
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.5;
+    }
+
+    .story-card .why-matters strong {
+      color: #0369a1;
+    }
+
+    /* NO NEWS */
+    .no-news {
+      text-align: center;
+      padding: 50px 30px;
+      color: #64748b;
+    }
+
+    .no-news p {
+      font-size: 16px;
+      line-height: 1.6;
+      margin: 0;
+    }
+
+    /* FOOTER */
+    .email-footer {
+      text-align: center;
+      padding: 25px 20px;
+      background-color: #f8fafc;
+      border-top: 1px solid #e2e8f0;
+    }
+
+    .email-footer p {
+      margin: 5px 0;
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    /* RESPONSIVE STYLES */
+    @media screen and (max-width: 680px) {
+      .email-wrapper {
+        padding: 10px !important;
+      }
+
+      .email-container {
+        border-radius: 8px !important;
+      }
+
+      .email-header {
+        padding: 25px 15px !important;
+      }
+
+      .email-header h1 {
+        font-size: 24px !important;
+      }
+
+      .email-header .date {
+        font-size: 14px !important;
+      }
+
+      .email-content {
+        padding: 20px 15px !important;
+      }
+
+      .top-signals {
+        padding: 15px !important;
+        margin-bottom: 25px !important;
+      }
+
+      .top-signals h2 {
+        font-size: 16px !important;
+      }
+
+      .top-signals li {
+        font-size: 14px !important;
+      }
+
+      .genre-header {
+        padding: 10px 15px !important;
+        font-size: 15px !important;
+      }
+
+      .story-card {
+        padding: 15px !important;
+        margin-bottom: 12px !important;
+      }
+
+      .story-card h3 {
+        font-size: 16px !important;
+      }
+
+      .story-card .summary {
+        font-size: 13px !important;
+      }
+
+      .story-card .why-matters {
+        padding: 10px 12px !important;
+        font-size: 12px !important;
+      }
+    }
+
+    /* DARK MODE SUPPORT */
+    @media (prefers-color-scheme: dark) {
+      .email-wrapper {
+        background-color: #1e293b !important;
+      }
+    }
+
+    /* OUTLOOK FALLBACKS */
+    <!--[if mso]>
+    .email-header {
+      background-color: #003d96 !important;
+    }
+    <![endif]-->
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f3feff;">
+  <div class="email-wrapper" style="width: 100%; background-color: #f3feff; padding: 20px 0;">
+    <!--[if mso]>
+    <table align="center" border="0" cellpadding="0" cellspacing="0" width="680">
+    <tr>
+    <td>
+    <![endif]-->
+
+    <table role="presentation" class="email-container" cellspacing="0" cellpadding="0" border="0" width="100%" style="max-width: 680px; margin: 0 auto; background-color: #ffffff; border-radius: 12px;">
+
+      <!-- HEADER -->
+      <tr>
+        <td class="email-header" style="background: linear-gradient(135deg, #003d96 0%, #0056b3 100%); padding: 30px 20px; text-align: center;">
+          <!--[if mso]>
+          <table width="100%" bgcolor="#003d96"><tr><td style="padding: 30px 20px; text-align: center;">
+          <![endif]-->
+          <h1 style="margin: 0 0 10px 0; font-size: 28px; font-weight: 700; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">44 News Automation</h1>
+          <p class="date" style="margin: 0; font-size: 16px; color: rgba(255, 255, 255, 0.9); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">Morning Brief &mdash; {{DATE}}</p>
+          <!--[if mso]>
+          </td></tr></table>
+          <![endif]-->
+        </td>
+      </tr>
+
+      <!-- CONTENT -->
+      <tr>
+        <td class="email-content" style="padding: 30px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
+
+          {{#if HAS_STORIES}}
+
+          <!-- TOP SIGNALS -->
+          {{#if TOP_SIGNALS}}
+          <div class="top-signals" style="background-color: #f8fafc; border-left: 4px solid #003d96; padding: 20px; margin-bottom: 30px; border-radius: 0 8px 8px 0;">
+            <h2 style="margin: 0 0 15px 0; font-size: 18px; font-weight: 600; color: #003d96;">&#9733; Top Signals</h2>
+            <ul style="margin: 0; padding-left: 20px;">
+              {{#each TOP_SIGNALS}}
+              <li style="margin-bottom: 8px; color: #334155; font-size: 15px; line-height: 1.5;">
+                <a href="{{canonical_url}}" style="color: #003d96; text-decoration: none;">{{polished_title}}</a>
+              </li>
+              {{/each}}
+            </ul>
+          </div>
+          {{/if}}
+
+          <!-- GENRE SECTIONS -->
+          {{#each GENRES}}
+          <div class="genre-section" style="margin-bottom: 30px;">
+            <div class="genre-header" style="background-color: {{color}}; color: #ffffff; padding: 12px 20px; border-radius: 8px; margin-bottom: 15px; font-size: 16px; font-weight: 600;">
+              {{name}}
+            </div>
+
+            {{#each stories}}
+            <div class="story-card" style="background-color: #f8fafc; border-radius: 8px; padding: 20px; margin-bottom: 15px; border-left: 4px solid #e2e8f0;">
+              <h3 style="margin: 0 0 8px 0; font-size: 17px; font-weight: 600; line-height: 1.4;">
+                <a href="{{canonical_url}}" style="color: #003d96; text-decoration: none;">{{polished_title}}</a>
+              </h3>
+              <p class="source" style="font-size: 12px; color: #64748b; margin: 0 0 12px 0;">
+                {{source_name}}
+              </p>
+              <p class="summary" style="font-size: 14px; color: #334155; margin: 0 0 15px 0; line-height: 1.6;">
+                {{summary}}
+              </p>
+              <div class="why-matters" style="background-color: #e0f2fe; border-left: 3px solid #0284c7; border-radius: 0 6px 6px 0; padding: 12px 15px; font-size: 13px; color: #475569; line-height: 1.5;">
+                <strong style="color: #0369a1;">Why this matters:</strong> {{why_matters}}
+              </div>
+            </div>
+            {{/each}}
+
+          </div>
+          {{/each}}
+
+          {{else}}
+
+          <!-- NO STORIES -->
+          <div class="no-news" style="text-align: center; padding: 50px 30px;">
+            <p style="font-size: 16px; line-height: 1.6; color: #64748b; margin: 0;">
+              {{NO_NEWS_MESSAGE}}
+            </p>
+          </div>
+
+          {{/if}}
+
+        </td>
+      </tr>
+
+      <!-- FOOTER -->
+      <tr>
+        <td class="email-footer" style="text-align: center; padding: 25px 20px; background-color: #f8fafc; border-top: 1px solid #e2e8f0;">
+          <p style="margin: 5px 0; font-size: 12px; color: #64748b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
+            Automated by 44 News Automation
+          </p>
+          <p style="margin: 5px 0; font-size: 12px; color: #64748b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
+            This email was generated automatically. Please do not reply.
+          </p>
+        </td>
+      </tr>
+
+    </table>
+
+    <!--[if mso]>
+    </td>
+    </tr>
+    </table>
+    <![endif]-->
+  </div>
+</body>
+</html>
+
+<!--
+================================================================================
+TEMPLATE VARIABLES REFERENCE
+================================================================================
+
+{{DATE}}
+  - Format: "Monday, 6 January 2026"
+  - UK timezone formatted date string
+
+{{HAS_STORIES}}
+  - Boolean: true if story count > 0
+
+{{TOP_SIGNALS}}
+  - Array of top 5 stories (by agency_relevance_score)
+  - Each item has: canonical_url, polished_title
+
+{{GENRES}}
+  - Array of genre objects, sorted alphabetically
+  - Each genre has:
+    - name: Genre name (e.g., "Financial")
+    - color: Hex color (e.g., "#15803d")
+    - stories: Array of story objects
+
+{{NO_NEWS_MESSAGE}}
+  - One of 7 rotating messages (based on day of year % 7):
+
+  Variant 1: "Today's scan found no stories meeting our quality criteria within the 24-hour window. We'll be back tomorrow with fresh insights."
+
+  Variant 2: "Our filters didn't surface any qualifying stories today. Sometimes quiet news days happen—we'll return tomorrow with the latest."
+
+  Variant 3: "No stories passed our quality threshold today. Rest assured, we're monitoring continuously and will deliver tomorrow's brief as usual."
+
+  Variant 4: "Today's news cycle didn't yield stories meeting our standards. We maintain strict criteria to ensure you only receive relevant, high-quality content."
+
+  Variant 5: "A rare quiet day in our monitored sources. Our automated checks continue around the clock—expect your next brief tomorrow at 07:00."
+
+  Variant 6: "No qualifying content today. Our multi-tier validation ensures quality over quantity. Tomorrow's brief will arrive on schedule."
+
+  Variant 7: "Today's sources didn't produce content meeting our publication criteria. Quality assurance remains our priority—see you tomorrow."
+
+STORY OBJECT PROPERTIES
+-----------------------
+canonical_url: Full URL to the original article
+polished_title: LLM-polished, factual title
+source_name: Publisher name (e.g., "Financial Times")
+summary: 3-6 sentence factual summary
+why_matters: Max 3 sentences, agency-focused, with marketing implication
+
+================================================================================
+GENRE COLOR REFERENCE
+================================================================================
+
+Office Equipment & Technology: #2563eb
+Food & Drink: #dc2626
+Telecommunications & Internet: #7c3aed
+Healthcare: #059669
+Education: #0891b2
+Tobacco & E-cigarettes: #57534e
+Charity & Nonprofit: #db2777
+Fashion: #c026d3
+Retail: #ea580c
+Professional & Business Services: #4f46e5
+Property & Construction: #ca8a04
+Agencies: #0d9488
+Entertainment: #e11d48
+Transportation & Logistics: #1d4ed8
+Consumer Electronics: #6366f1
+Travel & Tourism: #0284c7
+Financial: #15803d
+Utilities & Energy: #a16207
+Leisure & Hospitality: #be185d
+Media & Publishing: #9333ea
+Government & Public Sector: #1e40af
+Cosmetics & Personal Care: #ec4899
+Home & Garden: #65a30d
+Automotive: #b91c1c
+Manufacturing & Industrial: #475569
+Household Consumer Goods: #d97706
+
+================================================================================
+EMAIL CLIENT COMPATIBILITY
+================================================================================
+
+Tested and optimized for:
+- Gmail (Web, iOS, Android)
+- Apple Mail (macOS, iOS)
+- Outlook (2016, 2019, 365, Web)
+- Yahoo Mail
+- Samsung Email
+- Windows Mail
+
+Key compatibility notes:
+- MSO conditional comments for Outlook
+- Inline styles for maximum compatibility
+- Table-based layout for Outlook
+- Web-safe fonts with fallbacks
+- Dark mode support via prefers-color-scheme
+
+-->
