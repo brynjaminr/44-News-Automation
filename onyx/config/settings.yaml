@@ -1,0 +1,20 @@
+account:
+  broker: "BlueGuardian"
+  account_type: "instant_funding"
+  initial_balance: 50000
+  currency: "USD"
+
+risk:
+  max_daily_drawdown_pct: 2.0
+  max_overall_drawdown_pct: 6.0
+  daily_dd_warning_pct: 1.2
+  daily_dd_halt_pct: 1.7
+  overall_dd_warning_pct: 4.0
+  overall_dd_halt_pct: 5.0
+
+instruments:
+  allowed:
+    - "EURUSD"
+    - "GBPUSD"
+    - "EURGBP"
+    - "XAUUSD"
