@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Onyx Trading Bot - Main Entry Point
+44TradingBot - Main Entry Point
 Connects to MetaTrader 5 and monitors drawdown for Blue Guardian prop firm accounts.
 """
 import os
@@ -45,9 +45,9 @@ def format_status_line(dd_info: dict) -> str:
 
 
 def main():
-    """Main entry point for Onyx Trading Bot."""
+    """Main entry point for 44TradingBot."""
     print("=" * 60)
-    print("ONYX Trading Bot - Blue Guardian Instant Funding")
+    print("44TradingBot - Blue Guardian Instant Funding")
     print("=" * 60)
     print()
 
@@ -147,7 +147,7 @@ def main():
         # Clean disconnect
         print("Shutting down...")
         mt5_conn.disconnect()
-        print("Onyx Trading Bot stopped.")
+        print("44TradingBot stopped.")
 
 
 if __name__ == "__main__":

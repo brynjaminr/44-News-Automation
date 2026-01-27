@@ -1,4 +1,4 @@
-"""Drawdown Monitor module for Onyx Trading Bot"""
+"""Drawdown Monitor module for 44TradingBot"""
 
 try:
     import MetaTrader5 as mt5

@@ -1,4 +1,4 @@
-"""MT5 Connection module for Onyx Trading Bot"""
+"""MT5 Connection module for 44TradingBot"""
 import os
 
 try:
